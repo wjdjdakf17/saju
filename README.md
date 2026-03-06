@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Saju PDF Generator (Google Form → Vercel → Drive)
 
-## Getting Started
+Google Form 응답을 트리거로 Vercel API에서 **만세력(`manseryeok`) 계산 → Gemini로 HTML 생성(CSS 포함) → PDF 생성**을 수행하고, Apps Script가 PDF를 Google Drive에 업로드한 뒤 링크를 Google Sheets에 기록합니다.
 
-First, run the development server:
+### 로컬 실행
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local`에 아래 값을 채워주세요.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `GEMINI_API_KEY`: Gemini API Key (코드 하드코딩 금지, Vercel 환경변수 권장)
+- `GEMINI_MODEL`: 기본 `gemini-2.0-flash`
+- `WEBHOOK_SECRET`: Apps Script와 공유하는 시크릿
+- (옵션) `PUPPETEER_EXECUTABLE_PATH`: 로컬 PDF 렌더링용 Chrome 경로
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+로컬에서 **Gemini 없이** PDF 파이프라인만 빠르게 확인하려면:
 
-## Learn More
+```bash
+SKIP_GEMINI=true WEBHOOK_SECRET=devsecret \
+PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+PORT=3005 npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+그리고 다른 터미널에서:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+WEBHOOK_SECRET=devsecret BASE_URL=http://localhost:3005 bash scripts/smoke-generate.sh
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### API
 
-## Deploy on Vercel
+`POST /api/generate`  
+Headers:
+- `X-Webhook-Secret: <WEBHOOK_SECRET>`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Body:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```json
+{
+  "name": "홍길동",
+  "gender": "남",
+  "calendar": "solar",
+  "birth": { "year": 1992, "month": 10, "day": 24, "hour": 5, "minute": 30 },
+  "isLeapMonth": false
+}
+```
+
+Response:
+- `pdfBase64`: base64 encoded PDF
+- `fileName`: 파일명
+- `meta`: 만세력 일부 결과
+
+### Apps Script
+
+Apps Script 설정은 `apps-script/README.md`를 참고하세요.
+
