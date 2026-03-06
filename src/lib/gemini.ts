@@ -155,9 +155,10 @@ async function generateReportContentWithOpenAI(input: GeminiGenerateHtmlInput): 
     let parsed: unknown;
     let errorMessage = text;
     try {
-      parsed = JSON.parse(text) as { error?: { message?: string } };
-      if (typeof parsed?.error?.message === "string") {
-        errorMessage = parsed.error.message;
+      const parsedBody = JSON.parse(text) as { error?: { message?: string } };
+      parsed = parsedBody;
+      if (typeof parsedBody.error?.message === "string") {
+        errorMessage = parsedBody.error.message;
       }
     } catch {
       // Keep raw text if response body is not JSON.
