@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { mustGetEnv } from "@/lib/env";
 import { generateFallbackHtml } from "@/lib/fallbackHtml";
-import { GeminiRequestError, generateReportContentWithGemini } from "@/lib/gemini";
+import { LlmRequestError, generateReportContentWithGemini } from "@/lib/gemini";
 import { renderPdfFromHtml } from "@/lib/pdf";
 import { renderReportHtml } from "@/lib/reportTemplate";
 import { computeSaju } from "@/lib/saju";
@@ -113,13 +113,13 @@ export async function POST(req: Request) {
       },
     });
   } catch (err) {
-    if (err instanceof GeminiRequestError) {
+    if (err instanceof LlmRequestError) {
       if (err.status === 429) {
+        const providerLabel = err.provider === "openai" ? "OpenAI" : "Gemini";
         return NextResponse.json(
           {
-            error: "gemini_quota_exceeded",
-            message:
-              "Gemini API quota exceeded. Check GEMINI_API_KEY project quota/billing in Google AI Studio.",
+            error: `${err.provider}_quota_exceeded`,
+            message: `${providerLabel} API quota exceeded. Check API key project quota/billing.`,
             retryDelaySeconds: err.retryDelaySeconds,
             details: err.details,
           },
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json(
         {
-          error: "gemini_request_failed",
+          error: `${err.provider}_request_failed`,
           message: err.message,
           details: err.details,
         },

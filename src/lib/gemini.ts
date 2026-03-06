@@ -1,4 +1,4 @@
-import { mustGetEnv } from "@/lib/env";
+import { getOptionalEnv, mustGetEnv } from "@/lib/env";
 import { reportContentSchema, type ReportContent } from "@/lib/reportSchema";
 
 export type GeminiGenerateHtmlInput = {
@@ -29,15 +29,26 @@ type GeminiGenerateContentResponse = {
   }>;
 };
 
-export class GeminiRequestError extends Error {
+type OpenAiChatCompletionsResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+};
+
+type LlmProvider = "gemini" | "openai";
+
+export class LlmRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly provider: LlmProvider,
     readonly retryDelaySeconds?: number,
     readonly details?: unknown,
   ) {
     super(message);
-    this.name = "GeminiRequestError";
+    this.name = "LlmRequestError";
   }
 }
 
@@ -110,9 +121,76 @@ function buildPrompt(input: GeminiGenerateHtmlInput): string {
   ].join("\n");
 }
 
+async function generateReportContentWithOpenAI(input: GeminiGenerateHtmlInput): Promise<ReportContent> {
+  const apiKey = mustGetEnv("OPENAI_API_KEY");
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a Korean saju report writer. Return valid JSON only. Do not include markdown fences or explanations.",
+        },
+        {
+          role: "user",
+          content: buildPrompt(input),
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+      max_tokens: 2500,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let parsed: unknown;
+    let errorMessage = text;
+    try {
+      parsed = JSON.parse(text) as { error?: { message?: string } };
+      if (typeof parsed?.error?.message === "string") {
+        errorMessage = parsed.error.message;
+      }
+    } catch {
+      // Keep raw text if response body is not JSON.
+    }
+
+    throw new LlmRequestError(
+      `OpenAI request failed: ${res.status} ${res.statusText} ${errorMessage}`,
+      res.status,
+      "openai",
+      undefined,
+      parsed,
+    );
+  }
+
+  const data = (await res.json()) as OpenAiChatCompletionsResponse;
+  const raw = data.choices?.[0]?.message?.content?.trim();
+  if (!raw) {
+    throw new Error("OpenAI returned empty content");
+  }
+
+  const jsonText = extractJsonObject(raw);
+  const obj = JSON.parse(jsonText) as unknown;
+  return reportContentSchema.parse(obj);
+}
+
 export async function generateReportContentWithGemini(
   input: GeminiGenerateHtmlInput,
 ): Promise<ReportContent> {
+  const openAiKey = getOptionalEnv("OPENAI_API_KEY");
+  if (openAiKey) {
+    return generateReportContentWithOpenAI(input);
+  }
+
   const apiKey = mustGetEnv("GEMINI_API_KEY");
   const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
@@ -186,9 +264,10 @@ export async function generateReportContentWithGemini(
       // Keep raw text if response body is not JSON.
     }
 
-    throw new GeminiRequestError(
+    throw new LlmRequestError(
       `Gemini request failed: ${res.status} ${res.statusText} ${errorMessage}`,
       res.status,
+      "gemini",
       retryDelaySeconds,
       parsed,
     );

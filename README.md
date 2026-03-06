@@ -14,6 +14,8 @@ npm run dev
 
 - `GEMINI_API_KEY`: Gemini API Key (코드 하드코딩 금지, Vercel 환경변수 권장)
 - `GEMINI_MODEL`: 기본 `gemini-2.0-flash`
+- `OPENAI_API_KEY`: (선택) 설정 시 Gemini 대신 OpenAI 호출
+- `OPENAI_MODEL`: (선택) 기본 `gpt-4o-mini`
 - `WEBHOOK_SECRET`: Apps Script와 공유하는 시크릿
 - (옵션) `PUPPETEER_EXECUTABLE_PATH`: 로컬 PDF 렌더링용 Chrome 경로
 
@@ -57,4 +59,3 @@ Response:
 ### Apps Script
 
 Apps Script 설정은 `apps-script/README.md`를 참고하세요.
-
