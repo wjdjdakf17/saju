@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { mustGetEnv } from "@/lib/env";
 import { generateFallbackHtml } from "@/lib/fallbackHtml";
-import { generateReportContentWithGemini } from "@/lib/gemini";
+import { GeminiRequestError, generateReportContentWithGemini } from "@/lib/gemini";
 import { renderPdfFromHtml } from "@/lib/pdf";
 import { renderReportHtml } from "@/lib/reportTemplate";
 import { computeSaju } from "@/lib/saju";
@@ -113,8 +113,31 @@ export async function POST(req: Request) {
       },
     });
   } catch (err) {
+    if (err instanceof GeminiRequestError) {
+      if (err.status === 429) {
+        return NextResponse.json(
+          {
+            error: "gemini_quota_exceeded",
+            message:
+              "Gemini API quota exceeded. Check GEMINI_API_KEY project quota/billing in Google AI Studio.",
+            retryDelaySeconds: err.retryDelaySeconds,
+            details: err.details,
+          },
+          { status: 429 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: "gemini_request_failed",
+          message: err.message,
+          details: err.details,
+        },
+        { status: err.status >= 400 && err.status < 600 ? err.status : 502 },
+      );
+    }
+
     const message = err instanceof Error ? err.message : "unknown_error";
     return NextResponse.json({ error: "server_error", message }, { status: 500 });
   }
 }
-

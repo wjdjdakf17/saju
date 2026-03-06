@@ -29,6 +29,18 @@ type GeminiGenerateContentResponse = {
   }>;
 };
 
+export class GeminiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryDelaySeconds?: number,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "GeminiRequestError";
+  }
+}
+
 function extractJsonObject(raw: string): string {
   let text = raw.trim();
 
@@ -127,7 +139,59 @@ export async function generateReportContentWithGemini(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Gemini request failed: ${res.status} ${res.statusText} ${text}`);
+    let errorMessage = text;
+    let retryDelaySeconds: number | undefined;
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(text) as {
+        error?: {
+          message?: string;
+          details?: Array<{ "@type"?: string; retryDelay?: string }>;
+        };
+      };
+
+      const messageFromBody =
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "error" in parsed &&
+        typeof (parsed as { error?: { message?: string } }).error?.message === "string"
+          ? (parsed as { error: { message: string } }).error.message
+          : undefined;
+
+      if (messageFromBody) {
+        errorMessage = messageFromBody;
+      }
+
+      const details =
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "error" in parsed &&
+        Array.isArray((parsed as { error?: { details?: unknown[] } }).error?.details)
+          ? (parsed as { error: { details: Array<{ "@type"?: string; retryDelay?: string }> } })
+              .error.details
+          : [];
+
+      const retryInfo = details.find(
+        (d) => d?.["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+      );
+      const retryDelay = retryInfo?.retryDelay;
+      if (typeof retryDelay === "string") {
+        const parsedDelay = Number.parseInt(retryDelay, 10);
+        if (Number.isFinite(parsedDelay)) {
+          retryDelaySeconds = parsedDelay;
+        }
+      }
+    } catch {
+      // Keep raw text if response body is not JSON.
+    }
+
+    throw new GeminiRequestError(
+      `Gemini request failed: ${res.status} ${res.statusText} ${errorMessage}`,
+      res.status,
+      retryDelaySeconds,
+      parsed,
+    );
   }
 
   const data = (await res.json()) as GeminiGenerateContentResponse;
@@ -140,4 +204,3 @@ export async function generateReportContentWithGemini(
   const obj = JSON.parse(jsonText) as unknown;
   return reportContentSchema.parse(obj);
 }
-
