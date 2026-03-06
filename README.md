@@ -16,8 +16,12 @@ npm run dev
 - `GEMINI_MODEL`: 기본 `gemini-2.0-flash`
 - `OPENAI_API_KEY`: (선택) 설정 시 Gemini 대신 OpenAI 호출
 - `OPENAI_MODEL`: (선택) 기본 `gpt-4o-mini`
+- `REPORT_COVER_IMAGE_URL`: (선택) 첫 페이지 커버 배경 이미지 URL
 - `WEBHOOK_SECRET`: Apps Script와 공유하는 시크릿
 - (옵션) `PUPPETEER_EXECUTABLE_PATH`: 로컬 PDF 렌더링용 Chrome 경로
+
+예시:
+- `REPORT_COVER_IMAGE_URL=https://<your-vercel-app>.vercel.app/saju-cover-sample.png`
 
 로컬에서 **Gemini 없이** PDF 파이프라인만 빠르게 확인하려면:
 

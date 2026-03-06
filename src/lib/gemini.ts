@@ -68,7 +68,7 @@ function extractJsonObject(raw: string): string {
   const first = text.indexOf("{");
   const last = text.lastIndexOf("}");
   if (first === -1 || last === -1 || last <= first) {
-    throw new Error("Gemini did not return a JSON object");
+    throw new Error("LLM did not return a JSON object");
   }
   return text.slice(first, last + 1);
 }
@@ -89,6 +89,7 @@ function buildPrompt(input: GeminiGenerateHtmlInput): string {
     "- 키 이름은 영어 camelCase로 고정",
     "- 문자열은 한국어로 자연스럽고 간결하게",
     "- 과장/확정적 단정 금지(참고용 톤)",
+    "- A4 PDF 기준 충분한 분량(최소 6페이지 이상)으로 작성",
     "",
     "## 사용자",
     `- 이름: ${input.name}`,
@@ -106,15 +107,15 @@ function buildPrompt(input: GeminiGenerateHtmlInput): string {
     '  "title": "string",',
     '  "summary": {',
     '    "oneLine": "string",',
-    '    "keywords": ["string", "... 4~8개"],',
-    '    "highlights": ["string", "... 2~6개"]',
+    '    "keywords": ["string", "... 6~12개"],',
+    '    "highlights": ["string", "... 4~10개"]',
     "  },",
     '  "sections": [',
-    '    { "heading": "string", "bullets": ["string", "... 2~10개"] }',
+    '    { "heading": "string", "bullets": ["string", "... 4~12개"] }',
     "  ],",
     '  "elementBalance": {',
     '    "analysis": "string",',
-    '    "tips": ["string", "... 2~8개"]',
+    '    "tips": ["string", "... 4~10개"]',
     "  },",
     '  "disclaimer": "참고용/의학·법률·투자 조언 아님 포함"',
     "}",
@@ -146,7 +147,7 @@ async function generateReportContentWithOpenAI(input: GeminiGenerateHtmlInput): 
       ],
       response_format: { type: "json_object" },
       temperature: 0.7,
-      max_tokens: 2500,
+      max_tokens: 3500,
     }),
   });
 
@@ -232,9 +233,9 @@ export async function generateReportContentWithGemini(
 
       const messageFromBody =
         typeof parsed === "object" &&
-        parsed !== null &&
-        "error" in parsed &&
-        typeof (parsed as { error?: { message?: string } }).error?.message === "string"
+          parsed !== null &&
+          "error" in parsed &&
+          typeof (parsed as { error?: { message?: string } }).error?.message === "string"
           ? (parsed as { error: { message: string } }).error.message
           : undefined;
 
@@ -244,11 +245,11 @@ export async function generateReportContentWithGemini(
 
       const details =
         typeof parsed === "object" &&
-        parsed !== null &&
-        "error" in parsed &&
-        Array.isArray((parsed as { error?: { details?: unknown[] } }).error?.details)
+          parsed !== null &&
+          "error" in parsed &&
+          Array.isArray((parsed as { error?: { details?: unknown[] } }).error?.details)
           ? (parsed as { error: { details: Array<{ "@type"?: string; retryDelay?: string }> } })
-              .error.details
+            .error.details
           : [];
 
       const retryInfo = details.find(

@@ -6,6 +6,7 @@ export function renderReportHtml(params: {
   gender: string;
   calendarLabel: string;
   birthLabel: string;
+  coverImageUrl?: string;
   saju: SajuResult;
   report: ReportContent;
 }): string {
@@ -22,10 +23,11 @@ export function renderReportHtml(params: {
     .join("");
 
   const sections = report.sections
-    .map((sec) => {
+    .map((sec, index) => {
       const bullets = sec.bullets.map((b) => `<li>${escapeHtml_(b)}</li>`).join("");
+      const sectionBreakClass = (index + 1) % 2 === 0 ? " sectionBreak" : "";
       return `
-        <section class="card avoidBreak">
+        <section class="card avoidBreak${sectionBreakClass}">
           <h2 class="h2">${escapeHtml_(sec.heading)}</h2>
           <ul class="ul">${bullets}</ul>
         </section>
@@ -34,6 +36,11 @@ export function renderReportHtml(params: {
     .join("");
 
   const tips = report.elementBalance.tips.map((t) => `<li>${escapeHtml_(t)}</li>`).join("");
+  const coverBackgroundStyle = params.coverImageUrl
+    ? `background-image: linear-gradient(180deg, rgba(15,23,42,0.08) 0%, rgba(15,23,42,0.58) 100%), url('${escapeCssUrl_(
+        params.coverImageUrl,
+      )}');`
+    : "background-image: linear-gradient(160deg, #0f224d 0%, #142e72 40%, #192451 72%, #081533 100%);";
 
   return `<!doctype html>
 <html lang="ko">
@@ -57,7 +64,33 @@ export function renderReportHtml(params: {
       }
 
       .page { max-width: 820px; margin: 0 auto; padding: 0; }
-      .stack { display: grid; gap: 12px; }
+      .coverPage {
+        min-height: 258mm;
+        border-radius: 18px;
+        overflow: hidden;
+        background-size: cover;
+        background-position: center;
+        display: flex;
+        align-items: flex-end;
+        padding: 20px;
+        break-after: page;
+        page-break-after: always;
+      }
+      .coverOverlay {
+        width: 100%;
+        border-radius: 14px;
+        background: rgba(2, 6, 23, 0.45);
+        border: 1px solid rgba(250, 250, 250, 0.22);
+        color: #f8fafc;
+        padding: 16px 16px;
+      }
+      .coverEyebrow { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.08em; opacity: 0.9; }
+      .coverTitle { margin: 0; font-size: 34px; line-height: 1.15; letter-spacing: -0.03em; font-weight: 800; }
+      .coverMeta { margin: 10px 0 0; font-size: 13px; opacity: 0.95; }
+
+      .stack { display: block; }
+      .stack > * { margin-bottom: 12px; }
+      .stack > *:last-child { margin-bottom: 0; }
       .card {
         background: #ffffff;
         border: 1px solid #e4e4e7;
@@ -66,6 +99,7 @@ export function renderReportHtml(params: {
         box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
       }
       .avoidBreak { break-inside: avoid; page-break-inside: avoid; }
+      .sectionBreak { break-after: page; page-break-after: always; }
 
       .topbar {
         display: flex;
@@ -115,6 +149,15 @@ export function renderReportHtml(params: {
   </head>
   <body>
     <div class="page">
+      <section class="coverPage" style="${coverBackgroundStyle}">
+        <div class="coverOverlay">
+          <p class="coverEyebrow">SAJU REPORT</p>
+          <h1 class="coverTitle">${escapeHtml_(params.name)}님 정통 평생 운세</h1>
+          <p class="coverMeta">${escapeHtml_(params.birthLabel)} · ${escapeHtml_(params.calendarLabel)} · ${
+    new Date().toISOString().slice(0, 10)
+  }</p>
+        </div>
+      </section>
       <div class="stack">
         <header class="card avoidBreak">
           <div class="topbar">
@@ -212,4 +255,8 @@ function escapeHtml_(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeCssUrl_(s: string): string {
+  return String(s).replace(/["'()\\\n\r]/g, "");
 }

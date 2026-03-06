@@ -78,6 +78,7 @@ export async function POST(req: Request) {
             gender: input.gender,
             calendarLabel,
             birthLabel,
+            coverImageUrl: process.env.REPORT_COVER_IMAGE_URL,
             saju,
             report: await generateReportContentWithGemini({
               name: input.name,
