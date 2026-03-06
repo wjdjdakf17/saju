@@ -23,7 +23,7 @@ function onFormSubmit(e) {
 
   var name = pick_(named, ["이름", "name", "Name"]);
   var gender = pick_(named, ["성별", "gender", "Gender"]);
-  var calendarRaw = pick_(named, ["양/음력", "달력", "calendar", "Calendar"]);
+  var calendarRaw = pick_(named, ["양력/음력", "양/음력", "달력", "calendar", "Calendar"]);
   var birthDateRaw = pick_(named, ["생년월일", "birthdate", "Birthdate", "Birthday"]);
   var birthTimeRaw = pick_(named, ["출생시간", "birthtime", "Birthtime"]);
 
