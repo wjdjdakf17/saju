@@ -17,11 +17,12 @@ export function generateFallbackHtml(params: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml_(params.name)} 사주 리포트</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
       :root { color-scheme: light; }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+        font-family: "Noto Sans KR", "Noto Sans JP", "Noto Sans CJK KR", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", sans-serif;
         background: #f4f4f5;
         color: #18181b;
       }
@@ -108,4 +109,3 @@ function escapeHtml_(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-

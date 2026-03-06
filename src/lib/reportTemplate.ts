@@ -42,13 +42,14 @@ export function renderReportHtml(params: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml_(report.title)}</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
       @page { size: A4; margin: 14mm; }
       :root { color-scheme: light; }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+        font-family: "Noto Sans KR", "Noto Sans JP", "Noto Sans CJK KR", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", sans-serif;
         background: #f4f4f5;
         color: #0f172a;
         -webkit-print-color-adjust: exact;
@@ -212,4 +213,3 @@ function escapeHtml_(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-

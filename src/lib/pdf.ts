@@ -17,7 +17,11 @@ export async function renderPdfFromHtml(params: {
 
   try {
     const page = await browser.newPage();
-    await page.setContent(params.html, { waitUntil: "domcontentloaded" });
+    await page.setContent(params.html, { waitUntil: "networkidle0" });
+    await page.evaluate(async () => {
+      // Ensure web fonts are ready before printing to avoid tofu/square glyphs.
+      await document.fonts.ready;
+    });
     await page.emulateMediaType("screen");
 
     const pdf = await page.pdf({
@@ -31,4 +35,3 @@ export async function renderPdfFromHtml(params: {
     await browser.close();
   }
 }
-
