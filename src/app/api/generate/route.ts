@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     const backgroundImageUrl = await resolveReportBackgroundImageUrl();
     const footerLogoUrl = await resolveReportFooterLogoUrl();
     const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
-    let llmDebugTrace: LlmDebugTrace | undefined;
+    const llmDebugTraces: LlmDebugTrace[] = [];
     let report;
 
     if (process.env.SKIP_GEMINI !== "true") {
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
         },
         includeDebugOutput
           ? (trace) => {
-            llmDebugTrace = trace;
+            llmDebugTraces.push(trace);
           }
           : undefined,
       );
@@ -138,9 +138,9 @@ export async function POST(req: Request) {
       },
     };
 
-    if (includeDebugOutput && llmDebugTrace && report) {
+    if (includeDebugOutput && llmDebugTraces.length > 0 && report) {
       payload.debug = {
-        ...llmDebugTrace,
+        traces: llmDebugTraces,
         report,
       };
     }

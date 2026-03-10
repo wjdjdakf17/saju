@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { mustGetEnv } from "@/lib/env";
 import { reportContentSchema, type ReportContent } from "@/lib/reportSchema";
 
@@ -38,12 +40,73 @@ type OpenAiChatCompletionsResponse = {
 };
 
 type LlmProvider = "gemini" | "openai";
-type LlmDebugCapture = (trace: LlmDebugTrace) => void;
 type RequestedProvider = "gemini" | "openai";
+type LlmDebugCapture = (trace: LlmDebugTrace) => void;
+
+type SectionBlueprint = {
+  number: number;
+  title: string;
+  scoreLabel: string;
+};
+
+type ReportSection = ReportContent["sections"][number];
+
+type RawProviderResponse = {
+  provider: LlmProvider;
+  model: string;
+  raw: string;
+};
+
+const SECTION_BLUEPRINTS: SectionBlueprint[] = [
+  { number: 1, title: "사주풀이", scoreLabel: "종합 운명 점수" },
+  { number: 2, title: "대운(大運)", scoreLabel: "대운 흐름 점수" },
+  { number: 3, title: "세운(歲運)", scoreLabel: "세운 반응 점수" },
+  { number: 4, title: "신년운세 및 월운(月運)", scoreLabel: "단기 운세 점수" },
+  { number: 5, title: "12운성", scoreLabel: "기동 에너지 점수" },
+  { number: 6, title: "12신살 & 천을귀인 여부", scoreLabel: "귀인 조력 점수" },
+  { number: 7, title: "기타 신살 풀이", scoreLabel: "신살 활용 점수" },
+  { number: 8, title: "십성(十星)", scoreLabel: "사회성 점수" },
+  { number: 9, title: "재운(재물운)", scoreLabel: "재물 획득 점수" },
+  { number: 10, title: "관운(직업운)", scoreLabel: "사회적 성취 점수" },
+  { number: 11, title: "애정운(부부운)", scoreLabel: "배우자 복 점수" },
+  { number: 12, title: "자녀운", scoreLabel: "자녀 인연 점수" },
+  { number: 13, title: "건강운", scoreLabel: "생체 활력 점수" },
+  { number: 14, title: "이동운(이직, 이사운)", scoreLabel: "변화 적응 점수" },
+];
+
+const summarySchema = z.object({
+  title: z.string().min(1).max(80),
+  summary: z.object({
+    oneLine: z.string().min(1).max(200),
+    keywords: z.array(z.string().min(1).max(30)).min(6).max(12),
+    highlights: z.array(z.string().min(1).max(120)).min(4).max(10),
+  }),
+});
+
+const sectionChunkSchema = z.object({
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().min(1).max(120),
+        bullets: z.array(z.string().min(1).max(400)).min(1).max(20),
+      }),
+    )
+    .min(1)
+    .max(14),
+});
+
+const tailSchema = z.object({
+  elementBalance: z.object({
+    analysis: z.string().min(1).max(900),
+    tips: z.array(z.string().min(1).max(180)).min(4).max(10),
+  }),
+  disclaimer: z.string().min(1).max(300),
+});
 
 export type LlmDebugTrace = {
   provider: LlmProvider;
   model: string;
+  stage: string;
   prompt: string;
   raw: string;
 };
@@ -66,10 +129,68 @@ function resolveRequestedProvider(): RequestedProvider {
   return raw === "openai" ? "openai" : "gemini";
 }
 
+function getSectionBlueprint(number: number): SectionBlueprint {
+  const found = SECTION_BLUEPRINTS[number - 1];
+  if (!found) {
+    throw new Error(`Invalid section number: ${number}`);
+  }
+  return found;
+}
+
+function sectionHeadingExample(blueprint: SectionBlueprint): string {
+  return `${String(blueprint.number).padStart(2, "0")}. ${blueprint.title} [${
+    blueprint.scoreLabel
+  }: NN/100]`;
+}
+
+function sectionHeadingFallback(blueprint: SectionBlueprint): string {
+  return `${String(blueprint.number).padStart(2, "0")}. ${blueprint.title} [${
+    blueprint.scoreLabel
+  }: 70/100]`;
+}
+
+function buildContextBlock(input: GeminiGenerateHtmlInput): string {
+  const birthLabel = `${input.birth.year}-${String(input.birth.month).padStart(2, "0")}-${String(
+    input.birth.day,
+  ).padStart(2, "0")} ${String(input.birth.hour).padStart(2, "0")}:${String(input.birth.minute).padStart(2, "0")}`;
+
+  const calLabel = input.calendar === "lunar" ? "음력" : "양력";
+
+  return [
+    "# 역할: 세계 최고의 명리 분석가 및 운명 데이터 아키텍트",
+    "당신은 세계 최고 수준의 사주팔자 명리학 전문가입니다.",
+    "고전 명리 근거와 현대적 실천 조언을 함께 제시하세요.",
+    "",
+    "## 사용자",
+    `- 이름: ${input.name}`,
+    `- 성별: ${input.gender}`,
+    `- 생년월일/시간: ${birthLabel} (${calLabel})`,
+    "",
+    "## 사주팔자(만세력 결과)",
+    `- 한글: ${input.saju.fullKorean}`,
+    `- 한자: ${input.saju.fullHanja}`,
+    `- 오행(일간/일지): 천간=${input.saju.dayElement.stem}, 지지=${input.saju.dayElement.branch}`,
+    `- 음양(일간/일지): 천간=${input.saju.dayYinYang.stem}, 지지=${input.saju.dayYinYang.branch}`,
+  ].join("\n");
+}
+
+export function buildReportPrompt(input: GeminiGenerateHtmlInput): string {
+  const sectionLines = SECTION_BLUEPRINTS.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
+  return [
+    buildContextBlock(input),
+    "",
+    "## 전체 목차(14개)",
+    sectionLines,
+    "",
+    "## 출력 형식",
+    "- 반드시 JSON만 출력하세요.",
+    "- title/summary/sections(14)/elementBalance/disclaimer를 모두 포함하세요.",
+  ].join("\n");
+}
+
 function extractJsonObject(raw: string): string {
   let text = raw.trim();
 
-  // Strip markdown fences if present.
   const fenceStart = text.indexOf("```");
   if (fenceStart !== -1) {
     const fenceEnd = text.lastIndexOf("```");
@@ -87,86 +208,43 @@ function extractJsonObject(raw: string): string {
   return text.slice(first, last + 1);
 }
 
-export function buildReportPrompt(input: GeminiGenerateHtmlInput): string {
-  const birthLabel = `${input.birth.year}-${String(input.birth.month).padStart(2, "0")}-${String(
-    input.birth.day,
-  ).padStart(2, "0")} ${String(input.birth.hour).padStart(2, "0")}:${String(input.birth.minute).padStart(2, "0")}`;
-
-  const calLabel = input.calendar === "lunar" ? "음력" : "양력";
-
-  return [
-    "# 역할: 세계 최고의 명리 분석가 및 운명 데이터 아키텍트",
-    "당신은 수만 명의 생애를 감명하고 인생의 길흉화복을 데이터와 통찰로 풀어내는 세계 최고 수준의 사주팔자 명리학 전문가입니다.",
-    "사용자가 제공한 [생년월일시 및 성별]을 바탕으로 인생 대백과사전형 보고서를 작성하세요.",
-    "",
-    "## 핵심 수행 지침",
-    "1) 정량적 점수화: 14개 항목 모두 heading 시작에 100점 만점 점수를 표기하세요.",
-    "2) 고밀도 분석: 고전 명리 근거 + 현대적 해석 + 실제적 조언을 함께 제시하세요.",
-    "3) 무질문 원칙: 추가 질문 없이 제공 정보만으로 즉시 최종 보고서를 작성하세요.",
-    "",
-    "## 출력 제약(매우 중요)",
-    "- 반드시 JSON만 출력 (마크다운/설명/코드펜스/주석 금지)",
-    "- 키 이름은 영어 camelCase로 고정",
-    "- 문자열은 한국어로 작성",
-    "- 과장/확정적 단정 금지(참고용 톤)",
-    "- sections는 정확히 14개, 아래 순서와 점수 라벨 형식을 반드시 유지",
-    "- 각 section의 bullets는 8~12개 작성하고, 각 bullet은 120~220자 분량의 완결 문장으로 작성",
-    "- heading 형식: `NN. 항목명 [라벨 점수: NN/100]`",
-    "",
-    "## 사용자",
-    `- 이름: ${input.name}`,
-    `- 성별: ${input.gender}`,
-    `- 생년월일/시간: ${birthLabel} (${calLabel})`,
-    "",
-    "## 사주팔자(만세력 결과)",
-    `- 한글: ${input.saju.fullKorean}`,
-    `- 한자: ${input.saju.fullHanja}`,
-    `- 오행(일간/일지): 천간=${input.saju.dayElement.stem}, 지지=${input.saju.dayElement.branch}`,
-    `- 음양(일간/일지): 천간=${input.saju.dayYinYang.stem}, 지지=${input.saju.dayYinYang.branch}`,
-    "",
-    "## sections 고정 목차",
-    "01. 사주풀이 [종합 운명 점수: NN/100]",
-    "02. 대운(大運) [대운 흐름 점수: NN/100]",
-    "03. 세운(歲運) [세운 반응 점수: NN/100]",
-    "04. 신년운세 및 월운(月運) [단기 운세 점수: NN/100]",
-    "05. 12운성 [기동 에너지 점수: NN/100]",
-    "06. 12신살 & 천을귀인 여부 [귀인 조력 점수: NN/100]",
-    "07. 기타 신살 풀이 [신살 활용 점수: NN/100]",
-    "08. 십성(十星) [사회성 점수: NN/100]",
-    "09. 재운(재물운) [재물 획득 점수: NN/100]",
-    "10. 관운(직업운) [사회적 성취 점수: NN/100]",
-    "11. 애정운(부부운) [배우자 복 점수: NN/100]",
-    "12. 자녀운 [자녀 인연 점수: NN/100]",
-    "13. 건강운 [생체 활력 점수: NN/100]",
-    "14. 이동운(이직, 이사운) [변화 적응 점수: NN/100]",
-    "",
-    "## JSON 스키마(반드시 준수)",
-    "{",
-    '  "title": "string",',
-    '  "summary": {',
-    '    "oneLine": "string",',
-    '    "keywords": ["string", "... 6~12개"],',
-    '    "highlights": ["string", "... 4~10개"]',
-    "  },",
-    '  "sections": [',
-    '    { "heading": "string", "bullets": ["string", "... 8~12개"] }',
-    "  ],",
-    '  "elementBalance": {',
-    '    "analysis": "string",',
-    '    "tips": ["string", "... 4~10개"]',
-    "  },",
-    '  "disclaimer": "참고용/의학·법률·투자 조언 아님 포함"',
-    "}",
-  ].join("\n");
+function parseWithSchema<T>(
+  raw: string,
+  schema: z.ZodType<T>,
+  provider: LlmProvider,
+  stage: string,
+): T {
+  try {
+    const jsonText = extractJsonObject(raw);
+    const obj = JSON.parse(jsonText) as unknown;
+    return schema.parse(obj);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown_parse_error";
+    throw new LlmRequestError(
+      `${provider.toUpperCase()} returned invalid JSON (${stage}): ${message}`,
+      502,
+      provider,
+      undefined,
+      {
+        stage,
+        parseError: message,
+        rawLength: raw.length,
+        rawPreview: raw.slice(0, 2000),
+      },
+    );
+  }
 }
 
-async function generateReportContentWithOpenAI(
-  input: GeminiGenerateHtmlInput,
-  debugCapture?: LlmDebugCapture,
-): Promise<ReportContent> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestRawFromOpenAI(
+  prompt: string,
+  maxTokens: number,
+): Promise<RawProviderResponse> {
   const apiKey = mustGetEnv("OPENAI_API_KEY");
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const prompt = buildReportPrompt(input);
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -180,7 +258,7 @@ async function generateReportContentWithOpenAI(
         {
           role: "system",
           content:
-            "You are a Korean saju report writer. Return valid JSON only. Do not include markdown fences or explanations.",
+            "You write Korean saju reports. Return valid JSON only. No markdown fences or explanations.",
         },
         {
           role: "user",
@@ -188,8 +266,8 @@ async function generateReportContentWithOpenAI(
         },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 7000,
+      temperature: 0.6,
+      max_tokens: maxTokens,
     }),
   });
 
@@ -221,25 +299,16 @@ async function generateReportContentWithOpenAI(
   if (!raw) {
     throw new Error("OpenAI returned empty content");
   }
-  debugCapture?.({ provider: "openai", model, prompt, raw });
 
-  const jsonText = extractJsonObject(raw);
-  const obj = JSON.parse(jsonText) as unknown;
-  return reportContentSchema.parse(obj);
+  return { provider: "openai", model, raw };
 }
 
-export async function generateReportContentWithGemini(
-  input: GeminiGenerateHtmlInput,
-  debugCapture?: LlmDebugCapture,
-): Promise<ReportContent> {
-  const requestedProvider = resolveRequestedProvider();
-  if (requestedProvider === "openai") {
-    return generateReportContentWithOpenAI(input, debugCapture);
-  }
-
+async function requestRawFromGemini(
+  prompt: string,
+  maxOutputTokens: number,
+): Promise<RawProviderResponse> {
   const apiKey = mustGetEnv("GEMINI_API_KEY");
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const prompt = buildReportPrompt(input);
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
@@ -256,8 +325,9 @@ export async function generateReportContentWithGemini(
         },
       ],
       generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 8192,
+        temperature: 0.6,
+        maxOutputTokens,
+        responseMimeType: "application/json",
       },
     }),
   });
@@ -325,9 +395,340 @@ export async function generateReportContentWithGemini(
   if (!raw) {
     throw new Error("Gemini returned empty content");
   }
-  debugCapture?.({ provider: "gemini", model, prompt, raw });
 
-  const jsonText = extractJsonObject(raw);
-  const obj = JSON.parse(jsonText) as unknown;
-  return reportContentSchema.parse(obj);
+  return { provider: "gemini", model, raw };
+}
+
+async function requestRawFromProvider(
+  provider: RequestedProvider,
+  prompt: string,
+  maxTokens: number,
+): Promise<RawProviderResponse> {
+  if (provider === "openai") {
+    return requestRawFromOpenAI(prompt, maxTokens);
+  }
+  return requestRawFromGemini(prompt, maxTokens);
+}
+
+async function callProviderJsonWithRetry<T>(params: {
+  provider: RequestedProvider;
+  prompt: string;
+  schema: z.ZodType<T>;
+  stage: string;
+  maxTokens: number;
+  debugCapture?: LlmDebugCapture;
+  maxAttempts?: number;
+}): Promise<T> {
+  const { provider, prompt, schema, stage, maxTokens, debugCapture, maxAttempts = 3 } = params;
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const rawResult = await requestRawFromProvider(provider, prompt, maxTokens);
+      debugCapture?.({
+        provider: rawResult.provider,
+        model: rawResult.model,
+        stage: `${stage}:attempt${attempt}`,
+        prompt,
+        raw: rawResult.raw,
+      });
+
+      return parseWithSchema(rawResult.raw, schema, rawResult.provider, stage);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= maxAttempts) break;
+
+      const retryDelayMs =
+        err instanceof LlmRequestError && typeof err.retryDelaySeconds === "number"
+          ? Math.min(err.retryDelaySeconds * 1000, 6000)
+          : Math.min(400 * 2 ** (attempt - 1), 2500);
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("unknown_llm_error");
+}
+
+function buildSummaryPrompt(input: GeminiGenerateHtmlInput): string {
+  return [
+    buildContextBlock(input),
+    "",
+    "## 작업: 리포트 헤더 생성",
+    "- title과 summary만 생성하세요.",
+    "- JSON만 출력하세요.",
+    "",
+    "## 출력 제약",
+    "- title: 80자 이내",
+    "- summary.oneLine: 200자 이내",
+    "- summary.keywords: 6~12개",
+    "- summary.highlights: 4~10개",
+    "",
+    "## JSON 스키마",
+    "{",
+    '  "title": "string",',
+    '  "summary": {',
+    '    "oneLine": "string",',
+    '    "keywords": ["string"],',
+    '    "highlights": ["string"]',
+    "  }",
+    "}",
+  ].join("\n");
+}
+
+function buildSectionsPrompt(input: GeminiGenerateHtmlInput, start: number, end: number): string {
+  const blueprints = SECTION_BLUEPRINTS.slice(start - 1, end);
+  const sectionLines = blueprints.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
+
+  return [
+    buildContextBlock(input),
+    "",
+    `## 작업: sections ${start}~${end} 생성`,
+    "- 아래 목차만 생성하세요.",
+    "- heading은 목차 번호/항목명/점수 형식을 유지하세요.",
+    "- 각 bullets는 8~12개, 각 문장은 120~220자로 작성하세요.",
+    "- JSON만 출력하세요.",
+    "",
+    "## 목차",
+    sectionLines,
+    "",
+    "## JSON 스키마",
+    "{",
+    '  "sections": [',
+    '    { "heading": "string", "bullets": ["string"] }',
+    "  ]",
+    "}",
+  ].join("\n");
+}
+
+function buildSectionsCompactPrompt(input: GeminiGenerateHtmlInput, start: number, end: number): string {
+  const blueprints = SECTION_BLUEPRINTS.slice(start - 1, end);
+  const sectionLines = blueprints.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
+
+  return [
+    buildContextBlock(input),
+    "",
+    `## 긴급 작업: sections ${start}~${end} 축약 생성`,
+    "- 반드시 유효한 JSON만 출력하세요.",
+    "- 각 section은 bullets 4~6개로 작성하세요.",
+    "- 각 bullet은 80~140자 문장으로 작성하세요.",
+    "",
+    "## 목차",
+    sectionLines,
+    "",
+    "## JSON 스키마",
+    "{",
+    '  "sections": [',
+    '    { "heading": "string", "bullets": ["string"] }',
+    "  ]",
+    "}",
+  ].join("\n");
+}
+
+function buildTailPrompt(input: GeminiGenerateHtmlInput): string {
+  return [
+    buildContextBlock(input),
+    "",
+    "## 작업: elementBalance/disclaimer 생성",
+    "- elementBalance.analysis, elementBalance.tips, disclaimer만 생성하세요.",
+    "- JSON만 출력하세요.",
+    "",
+    "## JSON 스키마",
+    "{",
+    '  "elementBalance": {',
+    '    "analysis": "string",',
+    '    "tips": ["string"]',
+    "  },",
+    '  "disclaimer": "string"',
+    "}",
+  ].join("\n");
+}
+
+function normalizeHeading(rawHeading: string, blueprint: SectionBlueprint): string {
+  const expectedPrefix = `${String(blueprint.number).padStart(2, "0")}. `;
+  let heading = rawHeading.replace(/\s+/g, " ").trim();
+
+  if (!heading) {
+    return sectionHeadingFallback(blueprint);
+  }
+
+  if (/^\d{1,2}\.\s/.test(heading)) {
+    heading = heading.replace(/^\d{1,2}\.\s/, expectedPrefix);
+  } else if (!heading.startsWith(expectedPrefix)) {
+    heading = `${expectedPrefix}${heading}`;
+  }
+
+  if (!/\[.*\d{1,3}\/100\]/.test(heading)) {
+    heading = `${heading} [${blueprint.scoreLabel}: 70/100]`;
+  }
+
+  if (heading.length > 80) {
+    heading = heading.slice(0, 80).trim();
+  }
+
+  return heading;
+}
+
+function fallbackBullet(blueprint: SectionBlueprint): string {
+  return `${blueprint.title}은 시기별 강약이 분명하므로, 성급한 확정보다 기록과 점검을 반복하며 대응하면 변동성 속에서도 안정적인 결과를 만들 수 있습니다.`;
+}
+
+function normalizeBullets(rawBullets: string[], blueprint: SectionBlueprint): string[] {
+  const cleaned = rawBullets
+    .map((b) => b.replace(/\s+/g, " ").trim())
+    .filter((b) => b.length > 0)
+    .map((b) => (b.length > 220 ? `${b.slice(0, 217)}...` : b));
+
+  while (cleaned.length < 4) {
+    cleaned.push(fallbackBullet(blueprint));
+  }
+
+  return cleaned.slice(0, 12);
+}
+
+function normalizeSection(section: { heading: string; bullets: string[] }, sectionNumber: number): ReportSection {
+  const blueprint = getSectionBlueprint(sectionNumber);
+  return {
+    heading: normalizeHeading(section.heading, blueprint),
+    bullets: normalizeBullets(section.bullets, blueprint),
+  };
+}
+
+async function generateSummary(
+  provider: RequestedProvider,
+  input: GeminiGenerateHtmlInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<z.infer<typeof summarySchema>> {
+  const prompt = buildSummaryPrompt(input);
+  return callProviderJsonWithRetry({
+    provider,
+    prompt,
+    schema: summarySchema,
+    stage: "summary",
+    maxTokens: 2200,
+    debugCapture,
+    maxAttempts: 3,
+  });
+}
+
+async function generateTail(
+  provider: RequestedProvider,
+  input: GeminiGenerateHtmlInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<z.infer<typeof tailSchema>> {
+  const prompt = buildTailPrompt(input);
+  return callProviderJsonWithRetry({
+    provider,
+    prompt,
+    schema: tailSchema,
+    stage: "tail",
+    maxTokens: 3200,
+    debugCapture,
+    maxAttempts: 3,
+  });
+}
+
+async function generateSectionRangeDirect(
+  provider: RequestedProvider,
+  input: GeminiGenerateHtmlInput,
+  start: number,
+  end: number,
+  compactMode: boolean,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportSection[]> {
+  const prompt = compactMode
+    ? buildSectionsCompactPrompt(input, start, end)
+    : buildSectionsPrompt(input, start, end);
+  const expectedCount = end - start + 1;
+
+  const parsed = await callProviderJsonWithRetry({
+    provider,
+    prompt,
+    schema: sectionChunkSchema,
+    stage: compactMode ? `sections:${start}-${end}:compact` : `sections:${start}-${end}`,
+    maxTokens: compactMode ? 2600 : 6200,
+    debugCapture,
+    maxAttempts: compactMode ? 2 : 3,
+  });
+
+  if (parsed.sections.length !== expectedCount) {
+    throw new LlmRequestError(
+      `Section count mismatch for ${start}-${end}: expected ${expectedCount}, got ${parsed.sections.length}`,
+      502,
+      provider,
+      undefined,
+      {
+        start,
+        end,
+        expectedCount,
+        actualCount: parsed.sections.length,
+      },
+    );
+  }
+
+  return parsed.sections.map((section, idx) => normalizeSection(section, start + idx));
+}
+
+async function generateSectionsSafely(
+  provider: RequestedProvider,
+  input: GeminiGenerateHtmlInput,
+  start: number,
+  end: number,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportSection[]> {
+  try {
+    return await generateSectionRangeDirect(provider, input, start, end, false, debugCapture);
+  } catch (err) {
+    if (start < end) {
+      const mid = Math.floor((start + end) / 2);
+      const left = await generateSectionsSafely(provider, input, start, mid, debugCapture);
+      const right = await generateSectionsSafely(provider, input, mid + 1, end, debugCapture);
+      return [...left, ...right];
+    }
+
+    if (!(err instanceof LlmRequestError)) {
+      throw err;
+    }
+
+    return generateSectionRangeDirect(provider, input, start, end, true, debugCapture);
+  }
+}
+
+function buildSectionBatches(): Array<[number, number]> {
+  return [
+    [1, 2],
+    [3, 4],
+    [5, 6],
+    [7, 8],
+    [9, 10],
+    [11, 12],
+    [13, 14],
+  ];
+}
+
+export async function generateReportContentWithGemini(
+  input: GeminiGenerateHtmlInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportContent> {
+  const requestedProvider = resolveRequestedProvider();
+
+  const summaryPart = await generateSummary(requestedProvider, input, debugCapture);
+
+  const sections: ReportSection[] = [];
+  for (const [start, end] of buildSectionBatches()) {
+    const chunk = await generateSectionsSafely(requestedProvider, input, start, end, debugCapture);
+    sections.push(...chunk);
+  }
+
+  const tailPart = await generateTail(requestedProvider, input, debugCapture);
+
+  const report = {
+    title: summaryPart.title,
+    summary: summaryPart.summary,
+    sections,
+    elementBalance: tailPart.elementBalance,
+    disclaimer: tailPart.disclaimer,
+  };
+
+  return reportContentSchema.parse(report);
 }
