@@ -5,10 +5,18 @@ export function generateFallbackHtml(params: {
   gender: string;
   calendarLabel: string;
   birthLabel: string;
+  backgroundImageUrl?: string;
+  footerLogoUrl?: string;
   saju: SajuResult;
 }): string {
   const { saju } = params;
   const { korean, hanja } = saju.fourPillars;
+  const footerLogoHtml = params.footerLogoUrl
+    ? `<img class="pageFooterLogo" src="${escapeHtml_(params.footerLogoUrl)}" alt="footer logo" />`
+    : "";
+  const pageBackgroundStyle = params.backgroundImageUrl
+    ? `background-image: url('${escapeCssUrl_(params.backgroundImageUrl)}');`
+    : "background-image: linear-gradient(160deg, #d4c6ad 0%, #ece4d4 44%, #dbcfba 100%);";
 
   return `<!doctype html>
 <html lang="ko">
@@ -23,10 +31,15 @@ export function generateFallbackHtml(params: {
       body {
         margin: 0;
         font-family: "Noto Sans KR", "Noto Sans JP", "Noto Sans CJK KR", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", sans-serif;
-        background: #f4f4f5;
+        background: #efe7da;
         color: #18181b;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
-      .page { max-width: 820px; margin: 0 auto; padding: 28px; }
+      .pageBg { position: fixed; inset: 0; z-index: 0; background-position: center top; background-repeat: no-repeat; background-size: cover; }
+      .pageBgOverlay { position: fixed; inset: 0; z-index: 0; background: rgba(255, 255, 255, 0.68); }
+      .pageFooterLogo { position: fixed; left: 50%; bottom: 4mm; transform: translateX(-50%); width: 24mm; height: auto; z-index: 2; opacity: 0.95; }
+      .page { position: relative; z-index: 1; max-width: 820px; margin: 0 auto; padding: 28px; }
       .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 16px; padding: 20px; }
       .header { display:flex; justify-content:space-between; gap: 16px; align-items:flex-start; }
       .title { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
@@ -44,6 +57,9 @@ export function generateFallbackHtml(params: {
     </style>
   </head>
   <body>
+    <div class="pageBg" style="${pageBackgroundStyle}"></div>
+    <div class="pageBgOverlay"></div>
+    ${footerLogoHtml}
     <div class="page">
       <div class="card">
         <div class="header">
@@ -108,4 +124,8 @@ function escapeHtml_(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeCssUrl_(s: string): string {
+  return String(s).replace(/["'()\\\n\r]/g, "");
 }

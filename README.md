@@ -13,15 +13,20 @@ npm run dev
 `.env.local`에 아래 값을 채워주세요.
 
 - `GEMINI_API_KEY`: Gemini API Key (코드 하드코딩 금지, Vercel 환경변수 권장)
-- `GEMINI_MODEL`: 기본 `gemini-2.0-flash`
-- `OPENAI_API_KEY`: (선택) 설정 시 Gemini 대신 OpenAI 호출
+- `GEMINI_MODEL`: 기본 `gemini-3.1-flash`
+- `LLM_PROVIDER`: 기본 `gemini` (`openai`로 지정 시에만 OpenAI 호출)
+- `OPENAI_API_KEY`: (선택) `LLM_PROVIDER=openai`일 때 필요
 - `OPENAI_MODEL`: (선택) 기본 `gpt-4o-mini`
-- `REPORT_COVER_IMAGE_URL`: (선택) 첫 페이지 커버 배경 이미지 URL
+- `REPORT_BACKGROUND_IMAGE_URL`: (선택) 모든 PDF 페이지 배경 이미지 URL
+- `REPORT_FOOTER_LOGO_URL`: (선택) 모든 PDF 페이지 하단 중앙 로고 URL
+- `REPORT_COVER_IMAGE_URL`: (레거시) 배경 이미지 자동 로드 실패 시 fallback URL
 - `WEBHOOK_SECRET`: Apps Script와 공유하는 시크릿
+- `REPORT_DEBUG_OUTPUT`: (선택) `true`면 API 응답에 프롬프트/LLM raw/파싱 JSON 포함
 - (옵션) `PUPPETEER_EXECUTABLE_PATH`: 로컬 PDF 렌더링용 Chrome 경로
 
 예시:
-- `REPORT_COVER_IMAGE_URL=https://<your-vercel-app>.vercel.app/saju-cover-sample.png`
+- `REPORT_BACKGROUND_IMAGE_URL=https://<your-vercel-app>.vercel.app/saju-bg.png`
+- `REPORT_FOOTER_LOGO_URL=https://<your-vercel-app>.vercel.app/footer-logo.png`
 
 로컬에서 **Gemini 없이** PDF 파이프라인만 빠르게 확인하려면:
 

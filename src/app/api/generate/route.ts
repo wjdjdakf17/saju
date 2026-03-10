@@ -3,8 +3,13 @@ import { z } from "zod";
 
 import { mustGetEnv } from "@/lib/env";
 import { generateFallbackHtml } from "@/lib/fallbackHtml";
-import { LlmRequestError, generateReportContentWithGemini } from "@/lib/gemini";
+import {
+  LlmRequestError,
+  type LlmDebugTrace,
+  generateReportContentWithGemini,
+} from "@/lib/gemini";
 import { renderPdfFromHtml } from "@/lib/pdf";
+import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { renderReportHtml } from "@/lib/reportTemplate";
 import { computeSaju } from "@/lib/saju";
 
@@ -63,6 +68,35 @@ export async function POST(req: Request) {
     ).padStart(2, "0")}`;
 
     const calendarLabel = input.calendar === "lunar" ? "음력" : "양력";
+    const backgroundImageUrl = await resolveReportBackgroundImageUrl();
+    const footerLogoUrl = await resolveReportFooterLogoUrl();
+    const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
+    let llmDebugTrace: LlmDebugTrace | undefined;
+    let report;
+
+    if (process.env.SKIP_GEMINI !== "true") {
+      report = await generateReportContentWithGemini(
+        {
+          name: input.name,
+          gender: input.gender,
+          calendar: input.calendar,
+          birth: input.birth,
+          saju: {
+            fourPillarsKorean: saju.fourPillars.korean,
+            fourPillarsHanja: saju.fourPillars.hanja,
+            fullKorean: saju.fourPillars.fullKorean,
+            fullHanja: saju.fourPillars.fullHanja,
+            dayElement: saju.dayElement,
+            dayYinYang: saju.dayYinYang,
+          },
+        },
+        includeDebugOutput
+          ? (trace) => {
+            llmDebugTrace = trace;
+          }
+          : undefined,
+      );
+    }
 
     const html =
       process.env.SKIP_GEMINI === "true"
@@ -71,6 +105,8 @@ export async function POST(req: Request) {
             gender: input.gender,
             calendarLabel,
             birthLabel,
+            backgroundImageUrl,
+            footerLogoUrl,
             saju,
           })
         : renderReportHtml({
@@ -78,22 +114,10 @@ export async function POST(req: Request) {
             gender: input.gender,
             calendarLabel,
             birthLabel,
-            coverImageUrl: process.env.REPORT_COVER_IMAGE_URL,
+            backgroundImageUrl,
+            footerLogoUrl,
             saju,
-            report: await generateReportContentWithGemini({
-              name: input.name,
-              gender: input.gender,
-              calendar: input.calendar,
-              birth: input.birth,
-              saju: {
-                fourPillarsKorean: saju.fourPillars.korean,
-                fourPillarsHanja: saju.fourPillars.hanja,
-                fullKorean: saju.fourPillars.fullKorean,
-                fullHanja: saju.fourPillars.fullHanja,
-                dayElement: saju.dayElement,
-                dayYinYang: saju.dayYinYang,
-              },
-            }),
+            report: report!,
           });
 
     const pdfBytes = await renderPdfFromHtml({
@@ -103,7 +127,7 @@ export async function POST(req: Request) {
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
     const fileName = sanitizeFileName(`${input.name}_saju.pdf`);
 
-    return NextResponse.json({
+    const payload: Record<string, unknown> = {
       fileName,
       pdfBase64,
       meta: {
@@ -112,7 +136,16 @@ export async function POST(req: Request) {
         dayElement: saju.dayElement,
         dayYinYang: saju.dayYinYang,
       },
-    });
+    };
+
+    if (includeDebugOutput && llmDebugTrace && report) {
+      payload.debug = {
+        ...llmDebugTrace,
+        report,
+      };
+    }
+
+    return NextResponse.json(payload);
   } catch (err) {
     if (err instanceof LlmRequestError) {
       if (err.status === 429) {

@@ -10,12 +10,11 @@ export const reportContentSchema = z.object({
   sections: z
     .array(
       z.object({
-        heading: z.string().min(1).max(40),
+        heading: z.string().min(1).max(80),
         bullets: z.array(z.string().min(1).max(220)).min(4).max(12),
       }),
     )
-    .min(5)
-    .max(10),
+    .length(14),
   elementBalance: z.object({
     analysis: z.string().min(1).max(900),
     tips: z.array(z.string().min(1).max(180)).min(4).max(10),

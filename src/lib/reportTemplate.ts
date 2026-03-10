@@ -6,7 +6,8 @@ export function renderReportHtml(params: {
   gender: string;
   calendarLabel: string;
   birthLabel: string;
-  coverImageUrl?: string;
+  backgroundImageUrl?: string;
+  footerLogoUrl?: string;
   saju: SajuResult;
   report: ReportContent;
 }): string {
@@ -36,11 +37,12 @@ export function renderReportHtml(params: {
     .join("");
 
   const tips = report.elementBalance.tips.map((t) => `<li>${escapeHtml_(t)}</li>`).join("");
-  const coverBackgroundStyle = params.coverImageUrl
-    ? `background-image: linear-gradient(180deg, rgba(15,23,42,0.08) 0%, rgba(15,23,42,0.58) 100%), url('${escapeCssUrl_(
-        params.coverImageUrl,
-      )}');`
-    : "background-image: linear-gradient(160deg, #0f224d 0%, #142e72 40%, #192451 72%, #081533 100%);";
+  const footerLogoHtml = params.footerLogoUrl
+    ? `<img class="pageFooterLogo" src="${escapeHtml_(params.footerLogoUrl)}" alt="footer logo" />`
+    : "";
+  const pageBackgroundStyle = params.backgroundImageUrl
+    ? `background-image: url('${escapeCssUrl_(params.backgroundImageUrl)}');`
+    : "background-image: linear-gradient(160deg, #d4c6ad 0%, #ece4d4 44%, #dbcfba 100%);";
 
   return `<!doctype html>
 <html lang="ko">
@@ -57,19 +59,43 @@ export function renderReportHtml(params: {
       body {
         margin: 0;
         font-family: "Noto Sans KR", "Noto Sans JP", "Noto Sans CJK KR", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple SD Gothic Neo", sans-serif;
-        background: #f4f4f5;
+        background: #efe7da;
         color: #0f172a;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
+      .pageBg {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background-position: center top;
+        background-repeat: no-repeat;
+        background-size: cover;
+      }
+      .pageBgOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background: rgba(255, 255, 255, 0.68);
+      }
+      .pageFooterLogo {
+        position: fixed;
+        left: 50%;
+        bottom: 4mm;
+        transform: translateX(-50%);
+        width: 24mm;
+        height: auto;
+        z-index: 2;
+        opacity: 0.95;
+      }
 
-      .page { max-width: 820px; margin: 0 auto; padding: 0; }
+      .page { position: relative; z-index: 1; max-width: 820px; margin: 0 auto; padding: 0; }
       .coverPage {
         min-height: 258mm;
         border-radius: 18px;
         overflow: hidden;
-        background-size: cover;
-        background-position: center;
+        border: 1px solid rgba(254, 252, 232, 0.52);
+        background: rgba(2, 6, 23, 0.18);
         display: flex;
         align-items: flex-end;
         padding: 20px;
@@ -148,8 +174,11 @@ export function renderReportHtml(params: {
     </style>
   </head>
   <body>
+    <div class="pageBg" style="${pageBackgroundStyle}"></div>
+    <div class="pageBgOverlay"></div>
+    ${footerLogoHtml}
     <div class="page">
-      <section class="coverPage" style="${coverBackgroundStyle}">
+      <section class="coverPage">
         <div class="coverOverlay">
           <p class="coverEyebrow">SAJU REPORT</p>
           <h1 class="coverTitle">${escapeHtml_(params.name)}님 정통 평생 운세</h1>
