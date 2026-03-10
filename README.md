@@ -13,7 +13,7 @@ npm run dev
 `.env.local`에 아래 값을 채워주세요.
 
 - `GEMINI_API_KEY`: Gemini API Key (코드 하드코딩 금지, Vercel 환경변수 권장)
-- `GEMINI_MODEL`: 기본 `gemini-3.1-flash`
+- `GEMINI_MODEL`: 기본 `gemini-2.5-flash`
 - `LLM_PROVIDER`: 기본 `gemini` (`openai`로 지정 시에만 OpenAI 호출)
 - `OPENAI_API_KEY`: (선택) `LLM_PROVIDER=openai`일 때 필요
 - `OPENAI_MODEL`: (선택) 기본 `gpt-4o-mini`

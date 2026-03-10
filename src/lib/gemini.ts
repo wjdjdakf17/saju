@@ -238,7 +238,7 @@ export async function generateReportContentWithGemini(
   }
 
   const apiKey = mustGetEnv("GEMINI_API_KEY");
-  const model = process.env.GEMINI_MODEL || "gemini-3.1-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const prompt = buildReportPrompt(input);
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
