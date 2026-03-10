@@ -696,13 +696,9 @@ async function generateSectionsSafely(
 
 function buildSectionBatches(): Array<[number, number]> {
   return [
-    [1, 2],
-    [3, 4],
-    [5, 6],
-    [7, 8],
-    [9, 10],
-    [11, 12],
-    [13, 14],
+    [1, 6],
+    [7, 10],
+    [11, 14],
   ];
 }
 
@@ -714,11 +710,12 @@ export async function generateReportContentWithGemini(
 
   const summaryPart = await generateSummary(requestedProvider, input, debugCapture);
 
-  const sections: ReportSection[] = [];
-  for (const [start, end] of buildSectionBatches()) {
-    const chunk = await generateSectionsSafely(requestedProvider, input, start, end, debugCapture);
-    sections.push(...chunk);
-  }
+  const sectionChunks = await Promise.all(
+    buildSectionBatches().map(([start, end]) =>
+      generateSectionsSafely(requestedProvider, input, start, end, debugCapture),
+    ),
+  );
+  const sections = sectionChunks.flat();
 
   const tailPart = await generateTail(requestedProvider, input, debugCapture);
 

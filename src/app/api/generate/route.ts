@@ -15,6 +15,7 @@ import { computeSaju } from "@/lib/saju";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const birthSchema = z.object({
   year: z.number().int().min(1900).max(2100),
