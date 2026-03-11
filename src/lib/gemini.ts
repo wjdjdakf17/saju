@@ -603,21 +603,85 @@ function normalizeSection(section: { heading: string; bullets: string[] }, secti
   };
 }
 
+function buildFallbackSummary(input: GeminiGenerateHtmlInput): ReportSummaryPart {
+  const dayStem = input.saju.dayElement.stem;
+  const dayBranch = input.saju.dayElement.branch;
+  return {
+    title: `${input.name}님의 사주 종합 리포트`,
+    summary: {
+      oneLine: `${dayStem}/${dayBranch} 기운을 중심으로 강점과 리스크를 균형 있게 해석한 실전형 운세 가이드입니다.`,
+      keywords: [
+        "오행균형",
+        "대운흐름",
+        "연간변화",
+        "재물관리",
+        "직업성장",
+        "관계조율",
+      ],
+      highlights: [
+        "강한 추진력과 실행력이 장점이지만, 속도 조절이 성과 안정성에 중요합니다.",
+        "기회가 들어오는 시점과 리스크 구간이 분명하므로 일정 관리가 핵심입니다.",
+        "재정과 커리어는 단기 성과보다 지속 가능한 구조를 만들 때 상승 폭이 큽니다.",
+        "관계운은 대화 방식과 기대치 조절에 따라 체감 운세 차이가 크게 나타납니다.",
+      ],
+    },
+  };
+}
+
+function buildFallbackTail(): ReportTailPart {
+  return {
+    elementBalance: {
+      analysis:
+        "오행의 편중이 강할수록 특정 시기에는 성과가 빠르게 나타나지만, 반대 시기에는 피로와 시행착오가 늘 수 있습니다. 일정·수면·운동의 기본 루틴을 고정하면 운의 변동 폭을 줄이고 장기 성과를 안정화하는 데 도움이 됩니다.",
+      tips: [
+        "과로 누적을 막기 위해 주간 단위 휴식 시간을 먼저 캘린더에 고정하세요.",
+        "소화·순환·근골격계 컨디션을 점검하고 이상 신호는 초기에 관리하세요.",
+        "수면 시간을 일정하게 유지해 집중력 저하 구간을 최소화하세요.",
+        "카페인·야식·과음 빈도를 줄여 회복 속도를 높이세요.",
+      ],
+    },
+    disclaimer: "본 문서는 참고용 해석이며, 의학·법률·투자에 대한 확정적 조언이 아닙니다.",
+  };
+}
+
+function buildFallbackSection(sectionNumber: number): ReportSection {
+  const blueprint = getSectionBlueprint(sectionNumber);
+  return {
+    heading: sectionHeadingFallback(blueprint),
+    bullets: normalizeBullets(
+      [
+        `${blueprint.title}은 시기별 기복이 존재하므로, 결정 전 기준표를 두고 우선순위를 명확히 하면 실수를 줄일 수 있습니다.`,
+        `중요한 선택은 단일 이벤트보다 흐름으로 해석해야 하며, ${blueprint.title}은 준비 구간과 실행 구간을 분리할 때 성과가 좋아집니다.`,
+        `대인관계와 자원 배분의 균형을 맞추면 ${blueprint.title}의 체감 난이도가 낮아지고, 장기적으로 안정적인 결과를 기대할 수 있습니다.`,
+        `변동성 구간에서는 보수적 운영이 유리하며, 기록 기반 점검을 통해 반복 리스크를 줄이는 전략이 효과적입니다.`,
+      ],
+      blueprint,
+    ),
+  };
+}
+
 async function generateSummary(
   provider: RequestedProvider,
   input: GeminiGenerateHtmlInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<z.infer<typeof summarySchema>> {
   const prompt = buildSummaryPrompt(input);
-  return callProviderJsonWithRetry({
-    provider,
-    prompt,
-    schema: summarySchema,
-    stage: "summary",
-    maxTokens: 2200,
-    debugCapture,
-    maxAttempts: 3,
-  });
+  try {
+    return await callProviderJsonWithRetry({
+      provider,
+      prompt,
+      schema: summarySchema,
+      stage: "summary",
+      maxTokens: 2200,
+      debugCapture,
+      maxAttempts: 3,
+    });
+  } catch (err) {
+    if (err instanceof LlmRequestError) {
+      return buildFallbackSummary(input);
+    }
+    throw err;
+  }
 }
 
 async function generateTail(
@@ -626,15 +690,22 @@ async function generateTail(
   debugCapture?: LlmDebugCapture,
 ): Promise<z.infer<typeof tailSchema>> {
   const prompt = buildTailPrompt(input);
-  return callProviderJsonWithRetry({
-    provider,
-    prompt,
-    schema: tailSchema,
-    stage: "tail",
-    maxTokens: 3200,
-    debugCapture,
-    maxAttempts: 3,
-  });
+  try {
+    return await callProviderJsonWithRetry({
+      provider,
+      prompt,
+      schema: tailSchema,
+      stage: "tail",
+      maxTokens: 3200,
+      debugCapture,
+      maxAttempts: 3,
+    });
+  } catch (err) {
+    if (err instanceof LlmRequestError) {
+      return buildFallbackTail();
+    }
+    throw err;
+  }
 }
 
 async function generateSectionRangeDirect(
@@ -699,7 +770,14 @@ async function generateSectionsSafely(
       throw err;
     }
 
-    return generateSectionRangeDirect(provider, input, start, end, true, debugCapture);
+    try {
+      return await generateSectionRangeDirect(provider, input, start, end, true, debugCapture);
+    } catch (compactErr) {
+      if (start === end) {
+        return [buildFallbackSection(start)];
+      }
+      throw compactErr;
+    }
   }
 }
 
