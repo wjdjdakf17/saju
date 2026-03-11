@@ -88,9 +88,16 @@ function onFormSubmit(e) {
       muteHttpExceptions: true
     });
 
-    if (pollResp.getResponseCode() < 200 || pollResp.getResponseCode() >= 300) {
+    var pollStatus = pollResp.getResponseCode();
+    if (pollStatus < 200 || pollStatus >= 300) {
+      if (pollStatus === 429 || pollStatus === 502 || pollStatus === 503 || pollStatus === 504) {
+        if (attempt % 4 === 0) {
+          setByHeader_(sheet, row, "STATUS", "PROCESSING (RETRY)");
+        }
+        continue;
+      }
       setByHeader_(sheet, row, "STATUS", "FAILED");
-      setByHeader_(sheet, row, "ERROR", "Vercel poll error: " + pollResp.getResponseCode() + " " + pollResp.getContentText());
+      setByHeader_(sheet, row, "ERROR", "Vercel poll error: " + pollStatus + " " + pollResp.getContentText());
       return;
     }
 

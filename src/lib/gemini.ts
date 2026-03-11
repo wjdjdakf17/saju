@@ -57,6 +57,8 @@ type RawProviderResponse = {
   raw: string;
 };
 
+const LLM_REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS || "70000");
+
 const SECTION_BLUEPRINTS: SectionBlueprint[] = [
   { number: 1, title: "사주풀이", scoreLabel: "종합 운명 점수" },
   { number: 2, title: "대운(大運)", scoreLabel: "대운 흐름 점수" },
@@ -255,30 +257,47 @@ async function requestRawFromOpenAI(
   const apiKey = mustGetEnv("OPENAI_API_KEY");
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You write Korean saju reports. Return valid JSON only. No markdown fences or explanations.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.6,
-      max_tokens: maxTokens,
-    }),
-  });
+  const openAiController = new AbortController();
+  const openAiTimeout = setTimeout(() => openAiController.abort(), LLM_REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You write Korean saju reports. Return valid JSON only. No markdown fences or explanations.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.6,
+        max_tokens: maxTokens,
+      }),
+      signal: openAiController.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new LlmRequestError(
+        `OpenAI request timed out after ${LLM_REQUEST_TIMEOUT_MS}ms`,
+        504,
+        "openai",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(openAiTimeout);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -323,23 +342,40 @@ async function requestRawFromGemini(
     model,
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
+  const geminiController = new AbortController();
+  const geminiTimeout = setTimeout(() => geminiController.abort(), LLM_REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens,
+          responseMimeType: "application/json",
         },
-      ],
-      generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
+      }),
+      signal: geminiController.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new LlmRequestError(
+        `Gemini request timed out after ${LLM_REQUEST_TIMEOUT_MS}ms`,
+        504,
+        "gemini",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(geminiTimeout);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -728,7 +764,7 @@ async function generateSectionRangeDirect(
     stage: compactMode ? `sections:${start}-${end}:compact` : `sections:${start}-${end}`,
     maxTokens: compactMode ? 2600 : 6200,
     debugCapture,
-    maxAttempts: compactMode ? 2 : 3,
+    maxAttempts: compactMode ? 1 : 2,
   });
 
   if (parsed.sections.length !== expectedCount) {
@@ -782,11 +818,7 @@ async function generateSectionsSafely(
 }
 
 function buildSectionBatches(): Array<[number, number]> {
-  return [
-    [1, 6],
-    [7, 10],
-    [11, 14],
-  ];
+  return SECTION_BLUEPRINTS.map((bp) => [bp.number, bp.number] as [number, number]);
 }
 
 export function getReportSectionBatches(): Array<[number, number]> {
