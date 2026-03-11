@@ -8,7 +8,6 @@ import {
 } from "@/lib/asyncJob";
 import { mustGetEnv } from "@/lib/env";
 import { getReportSectionBatches } from "@/lib/gemini";
-import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { computeSaju } from "@/lib/saju";
 
 export const runtime = "nodejs";
@@ -44,8 +43,6 @@ export async function POST(req: Request) {
       input.birth.minute,
     ).padStart(2, "0")}`;
     const calendarLabel = input.calendar === "lunar" ? "음력" : "양력";
-    const backgroundImageUrl = await resolveReportBackgroundImageUrl();
-    const footerLogoUrl = await resolveReportFooterLogoUrl();
 
     const state: AsyncGenerateState = {
       version: 1,
@@ -57,8 +54,6 @@ export async function POST(req: Request) {
       birthLabel,
       calendarLabel,
       saju,
-      backgroundImageUrl,
-      footerLogoUrl,
       report: {
         sections: [],
       },
@@ -80,4 +75,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "server_error", message }, { status: 500 });
   }
 }
-

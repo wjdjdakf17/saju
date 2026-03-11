@@ -16,6 +16,7 @@ import {
   type LlmDebugTrace,
 } from "@/lib/gemini";
 import { renderPdfFromHtml } from "@/lib/pdf";
+import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { reportContentSchema } from "@/lib/reportSchema";
 import { renderReportHtml } from "@/lib/reportTemplate";
 
@@ -179,13 +180,16 @@ export async function POST(req: Request) {
       disclaimer: state.report.disclaimer || "",
     });
 
+    const backgroundImageUrl = state.backgroundImageUrl || (await resolveReportBackgroundImageUrl());
+    const footerLogoUrl = state.footerLogoUrl || (await resolveReportFooterLogoUrl());
+
     const html = renderReportHtml({
       name: state.input.name,
       gender: state.input.gender,
       calendarLabel: state.calendarLabel,
       birthLabel: state.birthLabel,
-      backgroundImageUrl: state.backgroundImageUrl,
-      footerLogoUrl: state.footerLogoUrl,
+      backgroundImageUrl,
+      footerLogoUrl,
       saju: state.saju,
       report,
     });
