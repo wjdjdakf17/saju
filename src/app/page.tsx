@@ -12,7 +12,7 @@ export default function Home() {
             <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">API</div>
             <div className="rounded-xl bg-zinc-900 p-4 text-sm text-zinc-50">
               <pre className="whitespace-pre-wrap break-words">
-{`POST /api/generate
+{`POST /api/generate/start
 Header: X-Webhook-Secret: <WEBHOOK_SECRET>
 
 {
@@ -21,11 +21,15 @@ Header: X-Webhook-Secret: <WEBHOOK_SECRET>
   "calendar": "solar",
   "birth": { "year": 1992, "month": 10, "day": 24, "hour": 5, "minute": 30 },
   "isLeapMonth": false
-}`}
+}
+
+POST /api/generate/poll
+Header: X-Webhook-Secret: <WEBHOOK_SECRET>
+Body: { "jobToken": "..." }`}
               </pre>
             </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              응답은 <span className="font-mono">pdfBase64</span>와 <span className="font-mono">fileName</span>을 포함합니다.
+              비동기 처리 완료 응답은 <span className="font-mono">pdfBase64</span>와 <span className="font-mono">fileName</span>을 포함합니다.
             </p>
           </div>
         </div>

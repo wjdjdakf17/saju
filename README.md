@@ -42,9 +42,11 @@ PORT=3005 npm run dev
 WEBHOOK_SECRET=devsecret BASE_URL=http://localhost:3005 bash scripts/smoke-generate.sh
 ```
 
-### API
+### API (Async Recommended)
 
-`POST /api/generate`  
+긴 작업(LLM + PDF) 타임아웃 회피를 위해 `start/poll` 비동기 흐름을 사용하세요.
+
+1) `POST /api/generate/start`  
 Headers:
 - `X-Webhook-Secret: <WEBHOOK_SECRET>`
 
@@ -61,9 +63,24 @@ Body:
 ```
 
 Response:
-- `pdfBase64`: base64 encoded PDF
-- `fileName`: 파일명
-- `meta`: 만세력 일부 결과
+- `status: "processing"`
+- `jobToken`: 다음 poll 호출에 전달할 토큰
+
+2) `POST /api/generate/poll`  
+Headers:
+- `X-Webhook-Secret: <WEBHOOK_SECRET>`
+
+Body:
+
+```json
+{ "jobToken": "..." }
+```
+
+Response:
+- 진행 중: `status: "processing"`, `jobToken`, `progressPercent`
+- 완료: `status: "completed"`, `pdfBase64`, `fileName`, `meta`
+
+레거시 동기 엔드포인트 `POST /api/generate`도 남아 있지만, 긴 생성에서는 타임아웃이 날 수 있습니다.
 
 ### Apps Script
 

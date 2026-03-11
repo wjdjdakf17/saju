@@ -3,8 +3,9 @@
  *
  * Flow:
  * - Read form values from e.namedValues
- * - POST to Vercel API (/api/generate)
- * - Receive { pdfBase64, fileName }
+ * - POST to Vercel async start API (/api/generate/start)
+ * - Poll Vercel async API (/api/generate/poll) until completed
+ * - Receive { status: completed, pdfBase64, fileName }
  * - Upload to Google Drive
  * - Write PDF URL back to the same response row
  * - Optional: send email
@@ -16,6 +17,9 @@ function onFormSubmit(e) {
   var WEBHOOK_SECRET = mustGetProp_(props, "WEBHOOK_SECRET");
   var DRIVE_FOLDER_ID = props.getProperty("DRIVE_FOLDER_ID"); // optional
   var PUBLIC_SHARE = (props.getProperty("PUBLIC_SHARE") || "true").toLowerCase() === "true";
+  var MAX_POLLS = Number(props.getProperty("MAX_POLLS") || "80");
+  var POLL_INTERVAL_MS = Number(props.getProperty("POLL_INTERVAL_MS") || "2500");
+  var endpoints = buildGenerateEndpoints_(VERCEL_ENDPOINT);
 
   var named = e && e.namedValues ? e.namedValues : {};
   var sheet = e && e.range ? e.range.getSheet() : SpreadsheetApp.getActiveSheet();
@@ -49,7 +53,7 @@ function onFormSubmit(e) {
   setByHeader_(sheet, row, "STATUS", "PROCESSING");
   setByHeader_(sheet, row, "ERROR", "");
 
-  var resp = UrlFetchApp.fetch(VERCEL_ENDPOINT, {
+  var startResp = UrlFetchApp.fetch(endpoints.start, {
     method: "post",
     contentType: "application/json",
     payload: JSON.stringify(requestBody),
@@ -57,16 +61,64 @@ function onFormSubmit(e) {
     muteHttpExceptions: true
   });
 
-  if (resp.getResponseCode() < 200 || resp.getResponseCode() >= 300) {
+  if (startResp.getResponseCode() < 200 || startResp.getResponseCode() >= 300) {
     setByHeader_(sheet, row, "STATUS", "FAILED");
-    setByHeader_(sheet, row, "ERROR", "Vercel API error: " + resp.getResponseCode() + " " + resp.getContentText());
+    setByHeader_(sheet, row, "ERROR", "Vercel start error: " + startResp.getResponseCode() + " " + startResp.getContentText());
     return;
   }
 
-  var data = JSON.parse(resp.getContentText());
-  if (!data || !data.pdfBase64 || !data.fileName) {
+  var startData = JSON.parse(startResp.getContentText());
+  if (!startData || !startData.jobToken) {
     setByHeader_(sheet, row, "STATUS", "FAILED");
-    setByHeader_(sheet, row, "ERROR", "Invalid response: " + resp.getContentText());
+    setByHeader_(sheet, row, "ERROR", "Invalid start response: " + startResp.getContentText());
+    return;
+  }
+
+  var jobToken = String(startData.jobToken);
+  var data = null;
+
+  for (var attempt = 0; attempt < MAX_POLLS; attempt++) {
+    if (attempt > 0) Utilities.sleep(POLL_INTERVAL_MS);
+
+    var pollResp = UrlFetchApp.fetch(endpoints.poll, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({ jobToken: jobToken }),
+      headers: { "X-Webhook-Secret": WEBHOOK_SECRET },
+      muteHttpExceptions: true
+    });
+
+    if (pollResp.getResponseCode() < 200 || pollResp.getResponseCode() >= 300) {
+      setByHeader_(sheet, row, "STATUS", "FAILED");
+      setByHeader_(sheet, row, "ERROR", "Vercel poll error: " + pollResp.getResponseCode() + " " + pollResp.getContentText());
+      return;
+    }
+
+    var pollData = JSON.parse(pollResp.getContentText());
+    if (pollData && pollData.status === "completed" && pollData.pdfBase64 && pollData.fileName) {
+      data = pollData;
+      break;
+    }
+
+    if (pollData && pollData.status === "processing" && pollData.jobToken) {
+      jobToken = String(pollData.jobToken);
+      if (attempt % 5 === 0) {
+        var progressText = typeof pollData.progressPercent === "number"
+          ? "PROCESSING " + pollData.progressPercent + "%"
+          : "PROCESSING";
+        setByHeader_(sheet, row, "STATUS", progressText);
+      }
+      continue;
+    }
+
+    setByHeader_(sheet, row, "STATUS", "FAILED");
+    setByHeader_(sheet, row, "ERROR", "Invalid poll response: " + pollResp.getContentText());
+    return;
+  }
+
+  if (!data) {
+    setByHeader_(sheet, row, "STATUS", "FAILED");
+    setByHeader_(sheet, row, "ERROR", "Polling timeout: generation not completed in allotted attempts");
     return;
   }
 
@@ -90,6 +142,15 @@ function onFormSubmit(e) {
     var body = "PDF 링크: " + url + "\n\n(참고용 리포트입니다.)";
     MailApp.sendEmail(email, subject, body);
   }
+}
+
+function buildGenerateEndpoints_(endpoint) {
+  var base = String(endpoint || "").replace(/\/+$/, "");
+  base = base.replace(/\/(start|poll)$/, "");
+  return {
+    start: base + "/start",
+    poll: base + "/poll"
+  };
 }
 
 function mustGetProp_(props, key) {
@@ -186,4 +247,3 @@ function setByHeader_(sheet, row, headerName, value) {
 
   sheet.getRange(row, col).setValue(value);
 }
-

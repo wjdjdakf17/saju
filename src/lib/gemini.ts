@@ -49,7 +49,7 @@ type SectionBlueprint = {
   scoreLabel: string;
 };
 
-type ReportSection = ReportContent["sections"][number];
+export type ReportSection = ReportContent["sections"][number];
 
 type RawProviderResponse = {
   provider: LlmProvider;
@@ -102,6 +102,15 @@ const tailSchema = z.object({
   }),
   disclaimer: z.string().min(1).max(300),
 });
+
+export type ReportSummaryPart = z.infer<typeof summarySchema>;
+export type ReportTailPart = z.infer<typeof tailSchema>;
+export type ReportSectionBatch = {
+  batchIndex: number;
+  start: number;
+  end: number;
+  sections: ReportSection[];
+};
 
 export type LlmDebugTrace = {
   provider: LlmProvider;
@@ -700,6 +709,45 @@ function buildSectionBatches(): Array<[number, number]> {
     [7, 10],
     [11, 14],
   ];
+}
+
+export function getReportSectionBatches(): Array<[number, number]> {
+  return buildSectionBatches();
+}
+
+export async function generateReportSummaryPart(
+  input: GeminiGenerateHtmlInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportSummaryPart> {
+  return generateSummary(resolveRequestedProvider(), input, debugCapture);
+}
+
+export async function generateReportSectionsBatchPart(
+  input: GeminiGenerateHtmlInput,
+  batchIndex: number,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportSectionBatch> {
+  const batches = buildSectionBatches();
+  const range = batches[batchIndex];
+  if (!range) {
+    throw new Error(`Invalid batchIndex: ${batchIndex}`);
+  }
+  const [start, end] = range;
+  const sections = await generateSectionsSafely(
+    resolveRequestedProvider(),
+    input,
+    start,
+    end,
+    debugCapture,
+  );
+  return { batchIndex, start, end, sections };
+}
+
+export async function generateReportTailPart(
+  input: GeminiGenerateHtmlInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportTailPart> {
+  return generateTail(resolveRequestedProvider(), input, debugCapture);
 }
 
 export async function generateReportContentWithGemini(
