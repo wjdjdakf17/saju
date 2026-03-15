@@ -25,11 +25,19 @@ export function renderReportHtml(params: {
 
   const sections = report.sections
     .map((sec, index) => {
+      const { titleOnly, score } = parseHeadingScore_(sec.heading);
       const bullets = sec.bullets.map((b) => `<li>${escapeHtml_(b)}</li>`).join("");
       const sectionBreakClass = (index + 1) % 2 === 0 ? " sectionBreak" : "";
+      const scoreBarHtml =
+        score != null
+          ? `<div class="scoreBarWrap"><div class="scoreBar" aria-hidden="true"><div class="scoreBarFill" style="width: ${score}%"></div></div><span class="scoreNum">${score}</span></div>`
+          : "";
       return `
         <section class="card avoidBreak${sectionBreakClass}">
-          <h2 class="h2">${escapeHtml_(sec.heading)}</h2>
+          <div class="h2Row">
+            <h2 class="h2">${escapeHtml_(titleOnly)}</h2>
+            ${scoreBarHtml}
+          </div>
           <ul class="ul">${bullets}</ul>
         </section>
       `;
@@ -80,16 +88,15 @@ export function renderReportHtml(params: {
       }
       .pageFooterLogo {
         position: fixed;
-        left: 50%;
-        bottom: 4mm;
-        transform: translateX(-50%);
-        width: 24mm;
+        right: 14mm;
+        bottom: 6mm;
+        width: 22mm;
         height: auto;
         z-index: 2;
-        opacity: 0.95;
+        opacity: 0.92;
       }
 
-      .page { position: relative; z-index: 1; max-width: 820px; margin: 0 auto; padding: 0; }
+      .page { position: relative; z-index: 1; max-width: 820px; margin: 0 auto; padding: 28px 24px 44px; }
       .coverPage {
         min-height: 258mm;
         border-radius: 18px;
@@ -98,7 +105,8 @@ export function renderReportHtml(params: {
         background: rgba(2, 6, 23, 0.18);
         display: flex;
         align-items: flex-end;
-        padding: 20px;
+        padding: 24px;
+        margin-bottom: 4px;
         break-after: page;
         page-break-after: always;
       }
@@ -115,14 +123,14 @@ export function renderReportHtml(params: {
       .coverMeta { margin: 10px 0 0; font-size: 13px; opacity: 0.95; }
 
       .stack { display: block; }
-      .stack > * { margin-bottom: 12px; }
+      .stack > * { margin-bottom: 18px; }
       .stack > *:last-child { margin-bottom: 0; }
       .card {
         background: #ffffff;
         border: 1px solid #e4e4e7;
-        border-radius: 16px;
-        padding: 18px 18px;
-        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+        border-radius: 12px;
+        padding: 20px 22px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
       }
       .avoidBreak { break-inside: avoid; page-break-inside: avoid; }
       .sectionBreak { break-after: page; page-break-after: always; }
@@ -155,13 +163,30 @@ export function renderReportHtml(params: {
       .k { margin: 0 0 6px; font-size: 11px; color: #64748b; letter-spacing: 0.02em; text-transform: uppercase; }
       .v { margin: 0; font-size: 14px; font-weight: 700; color: #0f172a; }
 
-      .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-      .chip { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #0ea5e9; color: #ffffff; font-size: 12px; font-weight: 700; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+      .chip {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #475569;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
 
-      .h2 { margin: 0 0 10px; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; }
-      .p { margin: 0; font-size: 13px; color: #334155; line-height: 1.65; }
-      .ul { margin: 0; padding-left: 16px; color: #334155; font-size: 13px; line-height: 1.65; }
-      .ul li { margin: 6px 0; }
+      .h2Row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+      .h2 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; flex: 1 1 auto; }
+      .scoreBarWrap { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+      .scoreBar { width: 72px; height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+      .scoreBarFill { height: 100%; background: linear-gradient(90deg, #475569, #64748b); border-radius: 999px; transition: width 0.2s ease; }
+      .scoreNum { font-size: 13px; font-weight: 700; color: #0f172a; min-width: 24px; }
+      .p { margin: 0; font-size: 13px; color: #334155; line-height: 1.85; }
+      .ul { margin: 0; padding-left: 20px; color: #334155; font-size: 13px; line-height: 1.9; }
+      .ul li { margin: 12px 0; padding-left: 4px; }
+      .ul li:first-child { margin-top: 4px; }
+      .ul li:last-child { margin-bottom: 4px; }
 
       table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; border: 1px solid #e4e4e7; }
       th, td { padding: 10px 12px; border-bottom: 1px solid #e4e4e7; text-align: left; font-size: 13px; }
@@ -275,6 +300,15 @@ export function renderReportHtml(params: {
     </div>
   </body>
 </html>`;
+}
+
+/** Extract score from heading like "01. 사주풀이 [종합 운명 점수: 85/100]" → { titleOnly: "01. 사주풀이", score: 85 } */
+function parseHeadingScore_(heading: string): { titleOnly: string; score: number | null } {
+  const match = heading.match(/(\d{1,3})\s*\/\s*100\s*\]/);
+  if (!match) return { titleOnly: heading, score: null };
+  const score = Math.min(100, Math.max(0, parseInt(match[1], 10)));
+  const titleOnly = heading.replace(/\s*\[[^\]]*\d{1,3}\s*\/\s*100\s*\]\s*$/, "").trim();
+  return { titleOnly: titleOnly || heading, score };
 }
 
 function escapeHtml_(s: string): string {

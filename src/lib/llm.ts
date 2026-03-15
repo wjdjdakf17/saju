@@ -255,7 +255,8 @@ async function requestRawFromOpenAI(
   maxTokens: number,
 ): Promise<RawProviderResponse> {
   const apiKey = mustGetEnv("OPENAI_API_KEY");
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  // gpt-5-mini: faster, cheaper. gpt-5.4: best quality, higher cost. See https://developers.openai.com/api/docs/models
+  const model = process.env.OPENAI_MODEL || "gpt-5-mini-2025-08-07";
 
   const openAiController = new AbortController();
   const openAiTimeout = setTimeout(() => openAiController.abort(), LLM_REQUEST_TIMEOUT_MS);

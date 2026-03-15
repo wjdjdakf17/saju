@@ -141,10 +141,8 @@ function pollPendingJobs() {
     }
   }
 
-  var remaining = countPendingJobs_(props);
-  if (remaining === 0) {
-    removePollerTrigger_();
-  }
+  // Do NOT remove the trigger when remaining === 0. Keeping it running ensures the next
+  // form submission gets polled without having to re-add the trigger manually.
 }
 
 function getTargetSpreadsheet_(props) {
@@ -481,4 +479,58 @@ function installPollerTrigger() {
  */
 function uninstallPollerTrigger() {
   removePollerTrigger_();
+}
+
+/**
+ * Manual test: run one poll for the first pending row and write result to sheet.
+ * Use this to verify the Vercel poll API works. If this advances STATUS %, the API is OK
+ * and the issue is the time trigger not running.
+ */
+function runOnePollManually() {
+  var props = PropertiesService.getScriptProperties();
+  var endpoints = buildGenerateEndpoints_(mustGetProp_(props, "VERCEL_ENDPOINT"));
+  var WEBHOOK_SECRET = mustGetProp_(props, "WEBHOOK_SECRET");
+  var DRIVE_FOLDER_ID = props.getProperty("DRIVE_FOLDER_ID");
+  var PUBLIC_SHARE = (props.getProperty("PUBLIC_SHARE") || "true").toLowerCase() === "true";
+  var emailField = props.getProperty("EMAIL_FIELD") || "이메일";
+
+  var ss = getTargetSpreadsheet_(props);
+  var sheets = ss.getSheets();
+  for (var s = 0; s < sheets.length; s++) {
+    var sheet = sheets[s];
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) continue;
+    for (var row = 2; row <= lastRow; row++) {
+      var status = String(getByHeader_(sheet, row, "STATUS") || "");
+      var token = String(getByHeader_(sheet, row, "JOB_TOKEN") || "");
+      if (!token) continue;
+      if (status === "DONE" || status === "FAILED") continue;
+
+      // Found first pending row — run one poll
+      var pollResp = postJson_(endpoints.poll, { jobToken: token }, WEBHOOK_SECRET);
+      var pollStatus = pollResp.status;
+      var pollData = safeJsonParse_(pollResp.text);
+
+      setByHeader_(sheet, row, "LAST_POLL_AT", new Date().toISOString());
+      setByHeader_(sheet, row, "LAST_POLL_STATUS", String(pollStatus));
+      if (pollStatus >= 200 && pollStatus < 300 && pollData) {
+        if (pollData.status === "completed" && pollData.pdfBase64 && pollData.fileName) {
+          finalizeCompletedRow_(sheet, row, pollData, DRIVE_FOLDER_ID, PUBLIC_SHARE, emailField);
+          return;
+        }
+        if (pollData.status === "processing" && pollData.jobToken) {
+          setByHeader_(sheet, row, "JOB_TOKEN", String(pollData.jobToken));
+          setByHeader_(sheet, row, "JOB_RETRY_ERRORS", "0");
+          var pct = pollData.progressPercent;
+          setByHeader_(sheet, row, "JOB_LAST_PROGRESS", String(pct != null ? pct : ""));
+          setByHeader_(sheet, row, "JOB_LAST_PROGRESS_AT", new Date().toISOString());
+          setByHeader_(sheet, row, "STATUS", "PROCESSING " + (pct != null ? pct + "%" : ""));
+          setByHeader_(sheet, row, "ERROR", "");
+          return;
+        }
+      }
+      setByHeader_(sheet, row, "ERROR", "Poll " + pollStatus + ": " + (pollResp.text || "").slice(0, 500));
+      return;
+    }
+  }
 }
