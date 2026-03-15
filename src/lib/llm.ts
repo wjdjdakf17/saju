@@ -854,8 +854,19 @@ async function generateSectionsSafely(
   }
 }
 
+/** Number of sections per LLM call (1 = one call per section, 3 = sections 1-3, 4-6, ...). Higher = fewer polls, but more tokens per call. */
+const SECTION_BATCH_SIZE = Math.max(1, Math.min(14, Number(process.env.SECTION_BATCH_SIZE) || 3));
+
 function buildSectionBatches(): Array<[number, number]> {
-  return SECTION_BLUEPRINTS.map((bp) => [bp.number, bp.number] as [number, number]);
+  if (SECTION_BATCH_SIZE <= 1) {
+    return SECTION_BLUEPRINTS.map((bp) => [bp.number, bp.number] as [number, number]);
+  }
+  const result: Array<[number, number]> = [];
+  for (let start = 1; start <= SECTION_BLUEPRINTS.length; start += SECTION_BATCH_SIZE) {
+    const end = Math.min(start + SECTION_BATCH_SIZE - 1, SECTION_BLUEPRINTS.length);
+    result.push([start, end] as [number, number]);
+  }
+  return result;
 }
 
 export function getReportSectionBatches(): Array<[number, number]> {
