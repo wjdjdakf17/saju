@@ -717,7 +717,7 @@ async function generateFullReport(
   }
 }
 
-function buildFallbackSection(sectionNumber: number): ReportSection {
+export function buildFallbackSection(sectionNumber: number): ReportSection {
   const blueprint = getSectionBlueprint(sectionNumber);
   return {
     heading: sectionHeadingFallback(blueprint),

@@ -9,6 +9,7 @@ import {
 } from "@/lib/asyncJob";
 import {
   LlmRequestError,
+  buildFallbackSection,
   generateReportSectionsBatchPart,
   generateReportSummaryPart,
   generateReportTailPart,
@@ -179,6 +180,11 @@ export async function POST(req: Request) {
       return NextResponse.json(response);
     }
 
+    // Ensure exactly 14 sections (pad with fallback if job was started with different batch size or partial run)
+    const sections = [...state.report.sections];
+    while (sections.length < 14) {
+      sections.push(buildFallbackSection(sections.length + 1));
+    }
     const report = reportContentSchema.parse({
       title: state.report.title || "",
       summary: state.report.summary || {
@@ -186,7 +192,7 @@ export async function POST(req: Request) {
         keywords: [],
         highlights: [],
       },
-      sections: state.report.sections,
+      sections: sections.slice(0, 14),
       elementBalance: state.report.elementBalance || { analysis: "", tips: [] },
       disclaimer: state.report.disclaimer || "",
     });
