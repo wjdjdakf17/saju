@@ -6,12 +6,14 @@ import { generateFallbackHtml } from "@/lib/fallbackHtml";
 import {
   LlmRequestError,
   type LlmDebugTrace,
-  generateReportContentWithGemini,
-} from "@/lib/gemini";
+  generateReportContentWithLlm,
+} from "@/lib/llm";
 import { renderPdfFromHtml } from "@/lib/pdf";
+import { isStrictRendererMode, resolvePdfRenderer } from "@/lib/pdfRenderer";
 import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { renderReportHtml } from "@/lib/reportTemplate";
 import { computeSaju } from "@/lib/saju";
+import { renderPdfFromTypst } from "@/lib/typst";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,12 +73,13 @@ export async function POST(req: Request) {
     const calendarLabel = input.calendar === "lunar" ? "음력" : "양력";
     const backgroundImageUrl = await resolveReportBackgroundImageUrl();
     const footerLogoUrl = await resolveReportFooterLogoUrl();
+    const skipLlm = process.env.SKIP_LLM === "true" || process.env.SKIP_GEMINI === "true";
     const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
     const llmDebugTraces: LlmDebugTrace[] = [];
     let report;
 
-    if (process.env.SKIP_GEMINI !== "true") {
-      report = await generateReportContentWithGemini(
+    if (!skipLlm) {
+      report = await generateReportContentWithLlm(
         {
           name: input.name,
           gender: input.gender,
@@ -99,31 +102,60 @@ export async function POST(req: Request) {
       );
     }
 
-    const html =
-      process.env.SKIP_GEMINI === "true"
-        ? generateFallbackHtml({
-            name: input.name,
-            gender: input.gender,
-            calendarLabel,
-            birthLabel,
-            backgroundImageUrl,
-            footerLogoUrl,
-            saju,
-          })
-        : renderReportHtml({
-            name: input.name,
-            gender: input.gender,
-            calendarLabel,
-            birthLabel,
-            backgroundImageUrl,
-            footerLogoUrl,
-            saju,
-            report: report!,
-          });
+    const renderer = resolvePdfRenderer();
+    const strictRenderer = isStrictRendererMode();
+    let pdfBytes: Uint8Array;
+    let rendererUsed: "html" | "typst" = "html";
 
-    const pdfBytes = await renderPdfFromHtml({
-      html,
-    });
+    if (renderer === "typst" && report) {
+      try {
+        pdfBytes = await renderPdfFromTypst({
+          name: input.name,
+          gender: input.gender,
+          calendarLabel,
+          birthLabel,
+          saju,
+          report,
+        });
+        rendererUsed = "typst";
+      } catch (err) {
+        if (strictRenderer) throw err;
+        const htmlFallback = renderReportHtml({
+          name: input.name,
+          gender: input.gender,
+          calendarLabel,
+          birthLabel,
+          backgroundImageUrl,
+          footerLogoUrl,
+          saju,
+          report,
+        });
+        pdfBytes = await renderPdfFromHtml({ html: htmlFallback });
+      }
+    } else {
+      const html =
+        skipLlm
+          ? generateFallbackHtml({
+              name: input.name,
+              gender: input.gender,
+              calendarLabel,
+              birthLabel,
+              backgroundImageUrl,
+              footerLogoUrl,
+              saju,
+            })
+          : renderReportHtml({
+              name: input.name,
+              gender: input.gender,
+              calendarLabel,
+              birthLabel,
+              backgroundImageUrl,
+              footerLogoUrl,
+              saju,
+              report: report!,
+            });
+      pdfBytes = await renderPdfFromHtml({ html });
+    }
 
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
     const fileName = sanitizeFileName(`${input.name}_saju.pdf`);
@@ -132,6 +164,7 @@ export async function POST(req: Request) {
       fileName,
       pdfBase64,
       meta: {
+        renderer: rendererUsed,
         fourPillarsKorean: saju.fourPillars.korean,
         fourPillarsHanja: saju.fourPillars.hanja,
         dayElement: saju.dayElement,

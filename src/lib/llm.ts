@@ -3,7 +3,7 @@ import { z } from "zod";
 import { mustGetEnv } from "@/lib/env";
 import { reportContentSchema, type ReportContent } from "@/lib/reportSchema";
 
-export type GeminiGenerateHtmlInput = {
+export type LlmGenerateInput = {
   name: string;
   gender: string;
   calendar: "solar" | "lunar";
@@ -57,7 +57,7 @@ type RawProviderResponse = {
   raw: string;
 };
 
-const LLM_REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS || "70000");
+const LLM_REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS || "45000");
 
 const SECTION_BLUEPRINTS: SectionBlueprint[] = [
   { number: 1, title: "사주풀이", scoreLabel: "종합 운명 점수" },
@@ -136,7 +136,7 @@ export class LlmRequestError extends Error {
 }
 
 function resolveRequestedProvider(): RequestedProvider {
-  const raw = (process.env.LLM_PROVIDER || "gemini").toLowerCase();
+  const raw = (process.env.LLM_PROVIDER || "openai").toLowerCase();
   return raw === "openai" ? "openai" : "gemini";
 }
 
@@ -160,7 +160,7 @@ function sectionHeadingFallback(blueprint: SectionBlueprint): string {
   }: 70/100]`;
 }
 
-function buildContextBlock(input: GeminiGenerateHtmlInput): string {
+function buildContextBlock(input: LlmGenerateInput): string {
   const birthLabel = `${input.birth.year}-${String(input.birth.month).padStart(2, "0")}-${String(
     input.birth.day,
   ).padStart(2, "0")} ${String(input.birth.hour).padStart(2, "0")}:${String(input.birth.minute).padStart(2, "0")}`;
@@ -185,7 +185,7 @@ function buildContextBlock(input: GeminiGenerateHtmlInput): string {
   ].join("\n");
 }
 
-export function buildReportPrompt(input: GeminiGenerateHtmlInput): string {
+export function buildReportPrompt(input: LlmGenerateInput): string {
   const sectionLines = SECTION_BLUEPRINTS.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
   return [
     buildContextBlock(input),
@@ -495,7 +495,7 @@ async function callProviderJsonWithRetry<T>(params: {
   throw lastError instanceof Error ? lastError : new Error("unknown_llm_error");
 }
 
-function buildSummaryPrompt(input: GeminiGenerateHtmlInput): string {
+function buildSummaryPrompt(input: LlmGenerateInput): string {
   return [
     buildContextBlock(input),
     "",
@@ -521,7 +521,7 @@ function buildSummaryPrompt(input: GeminiGenerateHtmlInput): string {
   ].join("\n");
 }
 
-function buildSectionsPrompt(input: GeminiGenerateHtmlInput, start: number, end: number): string {
+function buildSectionsPrompt(input: LlmGenerateInput, start: number, end: number): string {
   const blueprints = SECTION_BLUEPRINTS.slice(start - 1, end);
   const sectionLines = blueprints.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
 
@@ -546,7 +546,7 @@ function buildSectionsPrompt(input: GeminiGenerateHtmlInput, start: number, end:
   ].join("\n");
 }
 
-function buildSectionsCompactPrompt(input: GeminiGenerateHtmlInput, start: number, end: number): string {
+function buildSectionsCompactPrompt(input: LlmGenerateInput, start: number, end: number): string {
   const blueprints = SECTION_BLUEPRINTS.slice(start - 1, end);
   const sectionLines = blueprints.map((bp) => `- ${sectionHeadingExample(bp)}`).join("\n");
 
@@ -570,7 +570,7 @@ function buildSectionsCompactPrompt(input: GeminiGenerateHtmlInput, start: numbe
   ].join("\n");
 }
 
-function buildTailPrompt(input: GeminiGenerateHtmlInput): string {
+function buildTailPrompt(input: LlmGenerateInput): string {
   return [
     buildContextBlock(input),
     "",
@@ -639,7 +639,7 @@ function normalizeSection(section: { heading: string; bullets: string[] }, secti
   };
 }
 
-function buildFallbackSummary(input: GeminiGenerateHtmlInput): ReportSummaryPart {
+function buildFallbackSummary(input: LlmGenerateInput): ReportSummaryPart {
   const dayStem = input.saju.dayElement.stem;
   const dayBranch = input.saju.dayElement.branch;
   return {
@@ -680,6 +680,43 @@ function buildFallbackTail(): ReportTailPart {
   };
 }
 
+function buildFallbackReport(input: LlmGenerateInput): ReportContent {
+  const summaryPart = buildFallbackSummary(input);
+  const tailPart = buildFallbackTail();
+  const sections = SECTION_BLUEPRINTS.map((bp) => buildFallbackSection(bp.number));
+  return reportContentSchema.parse({
+    title: summaryPart.title,
+    summary: summaryPart.summary,
+    sections,
+    elementBalance: tailPart.elementBalance,
+    disclaimer: tailPart.disclaimer,
+  });
+}
+
+async function generateFullReport(
+  provider: RequestedProvider,
+  input: LlmGenerateInput,
+  debugCapture?: LlmDebugCapture,
+): Promise<ReportContent> {
+  const prompt = buildReportPrompt(input);
+  try {
+    return await callProviderJsonWithRetry({
+      provider,
+      prompt,
+      schema: reportContentSchema,
+      stage: "full_report",
+      maxTokens: 12000,
+      debugCapture,
+      maxAttempts: 1,
+    });
+  } catch (err) {
+    if (err instanceof LlmRequestError) {
+      return buildFallbackReport(input);
+    }
+    throw err;
+  }
+}
+
 function buildFallbackSection(sectionNumber: number): ReportSection {
   const blueprint = getSectionBlueprint(sectionNumber);
   return {
@@ -698,7 +735,7 @@ function buildFallbackSection(sectionNumber: number): ReportSection {
 
 async function generateSummary(
   provider: RequestedProvider,
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<z.infer<typeof summarySchema>> {
   const prompt = buildSummaryPrompt(input);
@@ -722,7 +759,7 @@ async function generateSummary(
 
 async function generateTail(
   provider: RequestedProvider,
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<z.infer<typeof tailSchema>> {
   const prompt = buildTailPrompt(input);
@@ -746,7 +783,7 @@ async function generateTail(
 
 async function generateSectionRangeDirect(
   provider: RequestedProvider,
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   start: number,
   end: number,
   compactMode: boolean,
@@ -787,7 +824,7 @@ async function generateSectionRangeDirect(
 
 async function generateSectionsSafely(
   provider: RequestedProvider,
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   start: number,
   end: number,
   debugCapture?: LlmDebugCapture,
@@ -826,14 +863,14 @@ export function getReportSectionBatches(): Array<[number, number]> {
 }
 
 export async function generateReportSummaryPart(
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<ReportSummaryPart> {
   return generateSummary(resolveRequestedProvider(), input, debugCapture);
 }
 
 export async function generateReportSectionsBatchPart(
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   batchIndex: number,
   debugCapture?: LlmDebugCapture,
 ): Promise<ReportSectionBatch> {
@@ -854,36 +891,19 @@ export async function generateReportSectionsBatchPart(
 }
 
 export async function generateReportTailPart(
-  input: GeminiGenerateHtmlInput,
+  input: LlmGenerateInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<ReportTailPart> {
   return generateTail(resolveRequestedProvider(), input, debugCapture);
 }
 
-export async function generateReportContentWithGemini(
-  input: GeminiGenerateHtmlInput,
+export async function generateReportContentWithLlm(
+  input: LlmGenerateInput,
   debugCapture?: LlmDebugCapture,
 ): Promise<ReportContent> {
   const requestedProvider = resolveRequestedProvider();
-
-  const summaryPart = await generateSummary(requestedProvider, input, debugCapture);
-
-  const sectionChunks = await Promise.all(
-    buildSectionBatches().map(([start, end]) =>
-      generateSectionsSafely(requestedProvider, input, start, end, debugCapture),
-    ),
-  );
-  const sections = sectionChunks.flat();
-
-  const tailPart = await generateTail(requestedProvider, input, debugCapture);
-
-  const report = {
-    title: summaryPart.title,
-    summary: summaryPart.summary,
-    sections,
-    elementBalance: tailPart.elementBalance,
-    disclaimer: tailPart.disclaimer,
-  };
-
-  return reportContentSchema.parse(report);
+  return generateFullReport(requestedProvider, input, debugCapture);
 }
+
+// Backward compatibility for existing imports.
+export const generateReportContentWithGemini = generateReportContentWithLlm;

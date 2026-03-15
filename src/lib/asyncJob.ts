@@ -3,7 +3,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import { z } from "zod";
 
-import type { LlmDebugTrace } from "@/lib/gemini";
+import type { LlmDebugTrace } from "@/lib/llm";
 import type { ReportContent } from "@/lib/reportSchema";
 import type { SajuResult } from "@/lib/saju";
 
@@ -109,4 +109,3 @@ export function getAsyncTotalSteps(sectionBatchCount: number): number {
   // summary + each section batch + tail + render
   return sectionBatchCount + 3;
 }
-

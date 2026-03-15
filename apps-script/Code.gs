@@ -1,16 +1,23 @@
 /**
- * Google Form -> Sheets async flow.
+ * Google Form -> Sheets flow.
  *
- * 1) onFormSubmit: call /api/generate/start only, store job token, exit quickly
- * 2) pollPendingJobs (time trigger): continue /api/generate/poll per row
- * 3) completed: upload PDF to Drive and update sheet
+ * Default:
+ * 1) onFormSubmit -> /api/generate (sync)
+ * 2) If sync fails with transient/runtime issues, auto fallback to async start/poll
+ *
+ * Optional async-only:
+ * - Set Script Property USE_ASYNC_FLOW=true
  */
 
 function onFormSubmit(e) {
   var props = PropertiesService.getScriptProperties();
   var endpoints = buildGenerateEndpoints_(mustGetProp_(props, "VERCEL_ENDPOINT"));
   var WEBHOOK_SECRET = mustGetProp_(props, "WEBHOOK_SECRET");
+  var DRIVE_FOLDER_ID = props.getProperty("DRIVE_FOLDER_ID");
+  var PUBLIC_SHARE = (props.getProperty("PUBLIC_SHARE") || "true").toLowerCase() === "true";
   var emailField = props.getProperty("EMAIL_FIELD") || "이메일";
+  // Default is sync flow (/api/generate). Set USE_ASYNC_FLOW=true only when needed.
+  var USE_ASYNC_FLOW = (props.getProperty("USE_ASYNC_FLOW") || "false").toLowerCase() === "true";
 
   var named = e && e.namedValues ? e.namedValues : {};
   var sheet = e && e.range ? e.range.getSheet() : SpreadsheetApp.getActiveSheet();
@@ -45,6 +52,34 @@ function onFormSubmit(e) {
     setByHeader_(sheet, row, "STATUS", "PROCESSING 0%");
     setByHeader_(sheet, row, "ERROR", "");
 
+    if (!USE_ASYNC_FLOW) {
+      var syncResult = processSyncGenerateFromFormSubmit_({
+        sheet: sheet,
+        row: row,
+        endpoints: endpoints,
+        webhookSecret: WEBHOOK_SECRET,
+        requestBody: requestBody,
+        driveFolderId: DRIVE_FOLDER_ID,
+        publicShare: PUBLIC_SHARE,
+        emailField: emailField,
+        name: name,
+        email: email
+      });
+
+      if (syncResult.ok) {
+        return;
+      }
+
+      if (!syncResult.fallbackToAsync) {
+        failRow_(sheet, row, syncResult.message);
+        return;
+      }
+
+      // Sync path failed due to transient/runtime issues. Fall back to async path.
+      setByHeader_(sheet, row, "STATUS", "PROCESSING 0% (ASYNC FALLBACK)");
+      setByHeader_(sheet, row, "ERROR", "");
+    }
+
     var startResp = postJson_(endpoints.start, requestBody, WEBHOOK_SECRET);
     if (startResp.status < 200 || startResp.status >= 300) {
       failRow_(sheet, row, "Vercel start error: " + startResp.status + " " + startResp.text);
@@ -65,12 +100,82 @@ function onFormSubmit(e) {
     setByHeader_(sheet, row, "JOB_RETRY_ERRORS", "0");
     setByHeader_(sheet, row, "JOB_EMAIL", email || "");
     setByHeader_(sheet, row, "JOB_NAME", name || "");
+    // Persist spreadsheet id for time-driven trigger context (no active UI sheet).
+    props.setProperty("SPREADSHEET_ID", sheet.getParent().getId());
 
     ensurePollerTrigger_();
   } catch (err) {
     var message = err && err.message ? err.message : String(err);
     failRow_(sheet, row, "onFormSubmit error: " + message);
   }
+}
+
+function processSyncGenerateFromFormSubmit_(params) {
+  var sheet = params.sheet;
+  var row = params.row;
+  try {
+    var resp = postJson_(params.endpoints.generate, params.requestBody, params.webhookSecret);
+    if (resp.status < 200 || resp.status >= 300) {
+      return {
+        ok: false,
+        fallbackToAsync: shouldFallbackToAsyncByStatus_(resp.status),
+        message: "Vercel generate error: " + resp.status + " " + truncateForCell_(resp.text)
+      };
+    }
+
+    var data = safeJsonParse_(resp.text);
+    if (!data || !data.pdfBase64 || !data.fileName) {
+      return {
+        ok: false,
+        fallbackToAsync: false,
+        message: "Invalid generate response: " + truncateForCell_(resp.text)
+      };
+    }
+
+    setByHeader_(sheet, row, "JOB_EMAIL", params.email || "");
+    setByHeader_(sheet, row, "JOB_NAME", params.name || "");
+    finalizeCompletedRow_(
+      sheet,
+      row,
+      data,
+      params.driveFolderId,
+      params.publicShare,
+      params.emailField
+    );
+    return { ok: true, fallbackToAsync: false, message: "" };
+  } catch (err) {
+    var message = err && err.message ? err.message : String(err);
+    return {
+      ok: false,
+      fallbackToAsync: shouldFallbackToAsyncByErrorMessage_(message),
+      message: "Sync generate exception: " + truncateForCell_(message)
+    };
+  }
+}
+
+function shouldFallbackToAsyncByStatus_(status) {
+  return status === 408 ||
+    status === 409 ||
+    status === 425 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 520 ||
+    status === 522 ||
+    status === 523 ||
+    status === 524;
+}
+
+function shouldFallbackToAsyncByErrorMessage_(message) {
+  var m = String(message || "").toLowerCase();
+  return m.indexOf("timed out") !== -1 ||
+    m.indexOf("timeout") !== -1 ||
+    m.indexOf("service unavailable") !== -1 ||
+    m.indexOf("socket") !== -1 ||
+    m.indexOf("address unavailable") !== -1 ||
+    m.indexOf("internal error") !== -1;
 }
 
 /**
@@ -90,7 +195,7 @@ function pollPendingJobs() {
   var MAX_JOB_MINUTES = Number(props.getProperty("MAX_JOB_MINUTES") || "180");
   var STALL_MINUTES = Number(props.getProperty("STALL_MINUTES") || "15");
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getTargetSpreadsheet_(props);
   var sheets = ss.getSheets();
   var processed = 0;
   var pendingCount = 0;
@@ -136,6 +241,16 @@ function pollPendingJobs() {
   if (remaining === 0) {
     removePollerTrigger_();
   }
+}
+
+function getTargetSpreadsheet_(props) {
+  var spreadsheetId = props.getProperty("SPREADSHEET_ID");
+  if (spreadsheetId) {
+    return SpreadsheetApp.openById(spreadsheetId);
+  }
+  var active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) return active;
+  throw new Error("Missing Script Property: SPREADSHEET_ID");
 }
 
 function processSinglePendingRow_(params) {
@@ -247,6 +362,7 @@ function buildGenerateEndpoints_(endpoint) {
   var base = String(endpoint || "").replace(/\/+$/, "");
   base = base.replace(/\/(start|poll)$/, "");
   return {
+    generate: base,
     start: base + "/start",
     poll: base + "/poll"
   };
@@ -448,7 +564,14 @@ function clearJobRuntimeColumns_(sheet, row) {
 
 function failRow_(sheet, row, message) {
   setByHeader_(sheet, row, "STATUS", "FAILED");
-  setByHeader_(sheet, row, "ERROR", String(message || "unknown_error"));
+  setByHeader_(sheet, row, "ERROR", truncateForCell_(String(message || "unknown_error")));
+}
+
+function truncateForCell_(text) {
+  var s = String(text || "");
+  var maxLen = 40000;
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + " ...(truncated)";
 }
 
 /**
@@ -463,4 +586,14 @@ function installPollerTrigger() {
  */
 function uninstallPollerTrigger() {
   removePollerTrigger_();
+}
+
+/**
+ * Manual utility: run once to store bound spreadsheet id into Script Properties.
+ */
+function installSpreadsheetId() {
+  var props = PropertiesService.getScriptProperties();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error("No active spreadsheet found");
+  props.setProperty("SPREADSHEET_ID", ss.getId());
 }

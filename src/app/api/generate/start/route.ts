@@ -7,7 +7,7 @@ import {
   type AsyncGenerateState,
 } from "@/lib/asyncJob";
 import { mustGetEnv } from "@/lib/env";
-import { getReportSectionBatches } from "@/lib/gemini";
+import { getReportSectionBatches } from "@/lib/llm";
 import { computeSaju } from "@/lib/saju";
 
 export const runtime = "nodejs";

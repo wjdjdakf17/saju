@@ -14,11 +14,13 @@ import {
   generateReportTailPart,
   getReportSectionBatches,
   type LlmDebugTrace,
-} from "@/lib/gemini";
+} from "@/lib/llm";
 import { renderPdfFromHtml } from "@/lib/pdf";
+import { isStrictRendererMode, resolvePdfRenderer } from "@/lib/pdfRenderer";
 import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { reportContentSchema } from "@/lib/reportSchema";
 import { renderReportHtml } from "@/lib/reportTemplate";
+import { renderPdfFromTypst } from "@/lib/typst";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -183,18 +185,49 @@ export async function POST(req: Request) {
     const backgroundImageUrl = state.backgroundImageUrl || (await resolveReportBackgroundImageUrl());
     const footerLogoUrl = state.footerLogoUrl || (await resolveReportFooterLogoUrl());
 
-    const html = renderReportHtml({
-      name: state.input.name,
-      gender: state.input.gender,
-      calendarLabel: state.calendarLabel,
-      birthLabel: state.birthLabel,
-      backgroundImageUrl,
-      footerLogoUrl,
-      saju: state.saju,
-      report,
-    });
+    const renderer = resolvePdfRenderer();
+    const strictRenderer = isStrictRendererMode();
+    let pdfBytes: Uint8Array;
+    let rendererUsed: "html" | "typst" = "html";
 
-    const pdfBytes = await renderPdfFromHtml({ html });
+    if (renderer === "typst") {
+      try {
+        pdfBytes = await renderPdfFromTypst({
+          name: state.input.name,
+          gender: state.input.gender,
+          calendarLabel: state.calendarLabel,
+          birthLabel: state.birthLabel,
+          saju: state.saju,
+          report,
+        });
+        rendererUsed = "typst";
+      } catch (err) {
+        if (strictRenderer) throw err;
+        const htmlFallback = renderReportHtml({
+          name: state.input.name,
+          gender: state.input.gender,
+          calendarLabel: state.calendarLabel,
+          birthLabel: state.birthLabel,
+          backgroundImageUrl,
+          footerLogoUrl,
+          saju: state.saju,
+          report,
+        });
+        pdfBytes = await renderPdfFromHtml({ html: htmlFallback });
+      }
+    } else {
+      const html = renderReportHtml({
+        name: state.input.name,
+        gender: state.input.gender,
+        calendarLabel: state.calendarLabel,
+        birthLabel: state.birthLabel,
+        backgroundImageUrl,
+        footerLogoUrl,
+        saju: state.saju,
+        report,
+      });
+      pdfBytes = await renderPdfFromHtml({ html });
+    }
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
     const fileName = sanitizeFileName(`${state.input.name}_saju.pdf`);
 
@@ -203,6 +236,7 @@ export async function POST(req: Request) {
       fileName,
       pdfBase64,
       meta: {
+        renderer: rendererUsed,
         fourPillarsKorean: state.saju.fourPillars.korean,
         fourPillarsHanja: state.saju.fourPillars.hanja,
         dayElement: state.saju.dayElement,
