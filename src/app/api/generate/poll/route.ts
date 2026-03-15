@@ -65,7 +65,12 @@ export async function POST(req: Request) {
       state = decodeAsyncStateToken(parsed.data.jobToken, expectedSecret);
     } catch (err) {
       const message = err instanceof Error ? err.message : "invalid_token";
+      console.error("[poll] invalid_job_token", message);
       return NextResponse.json({ error: "invalid_job_token", message }, { status: 400 });
+    }
+
+    if (process.env.REPORT_DEBUG_OUTPUT === "true") {
+      console.log("[poll] stage=" + state.stage + " completedSteps=" + state.completedSteps);
     }
 
     const sectionBatches = getReportSectionBatches();
@@ -80,6 +85,7 @@ export async function POST(req: Request) {
       : undefined;
 
     if (state.stage === "summary") {
+      if (process.env.REPORT_DEBUG_OUTPUT === "true") console.log("[poll] running stage: summary (LLM)");
       const summaryPart = await generateReportSummaryPart(
         {
           name: state.input.name,
@@ -103,6 +109,8 @@ export async function POST(req: Request) {
       state.stage = "sections";
       state.completedSteps += 1;
     } else if (state.stage === "sections") {
+      if (process.env.REPORT_DEBUG_OUTPUT === "true")
+        console.log("[poll] running stage: sections batchIndex=" + state.nextSectionBatchIndex);
       const batch = await generateReportSectionsBatchPart(
         {
           name: state.input.name,
@@ -130,6 +138,7 @@ export async function POST(req: Request) {
         state.stage = "tail";
       }
     } else if (state.stage === "tail") {
+      if (process.env.REPORT_DEBUG_OUTPUT === "true") console.log("[poll] running stage: tail (LLM)");
       const tailPart = await generateReportTailPart(
         {
           name: state.input.name,
@@ -248,7 +257,11 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(payload);
   } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const errStack = err instanceof Error ? err.stack : undefined;
+    console.error("[poll] failed", errMessage, errStack || "");
     if (err instanceof LlmRequestError) {
+      console.error("[poll] LlmRequestError", err.status, err.provider, err.details);
       if (err.status === 429) {
         const providerLabel = err.provider === "openai" ? "OpenAI" : "Gemini";
         return NextResponse.json(
