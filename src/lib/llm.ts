@@ -532,7 +532,7 @@ function buildSectionsPrompt(input: LlmGenerateInput, start: number, end: number
     `## 작업: sections ${start}~${end} 생성`,
     "- 아래 목차만 생성하세요.",
     "- heading은 목차 번호/항목명/점수 형식을 유지하세요.",
-    "- 각 bullets는 8~12개, 각 문장은 120~220자로 작성하세요.",
+    "- 각 bullets는 10~14개, 각 문장은 150~280자로 풍부하게 작성하세요.",
     "- JSON만 출력하세요.",
     "",
     "## 목차",
@@ -620,16 +620,17 @@ function fallbackBullet(blueprint: SectionBlueprint): string {
 }
 
 function normalizeBullets(rawBullets: string[], blueprint: SectionBlueprint): string[] {
+  const maxLen = 350;
   const cleaned = rawBullets
     .map((b) => b.replace(/\s+/g, " ").trim())
     .filter((b) => b.length > 0)
-    .map((b) => (b.length > 220 ? `${b.slice(0, 217)}...` : b));
+    .map((b) => (b.length > maxLen ? `${b.slice(0, maxLen - 3)}...` : b));
 
-  while (cleaned.length < 4) {
+  while (cleaned.length < 6) {
     cleaned.push(fallbackBullet(blueprint));
   }
 
-  return cleaned.slice(0, 12);
+  return cleaned.slice(0, 16);
 }
 
 function normalizeSection(section: { heading: string; bullets: string[] }, sectionNumber: number): ReportSection {

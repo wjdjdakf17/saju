@@ -11,7 +11,7 @@ export const reportContentSchema = z.object({
     .array(
       z.object({
         heading: z.string().min(1).max(80),
-        bullets: z.array(z.string().min(1).max(220)).min(4).max(12),
+        bullets: z.array(z.string().min(1).max(350)).min(6).max(16),
       }),
     )
     .length(14),

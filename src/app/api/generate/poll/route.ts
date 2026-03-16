@@ -18,6 +18,7 @@ import {
 } from "@/lib/llm";
 import { renderPdfFromHtml } from "@/lib/pdf";
 import { isStrictRendererMode, resolvePdfRenderer } from "@/lib/pdfRenderer";
+import { getOptionalEnv } from "@/lib/env";
 import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/lib/reportBackground";
 import { reportContentSchema } from "@/lib/reportSchema";
 import { renderReportHtml } from "@/lib/reportTemplate";
@@ -199,6 +200,7 @@ export async function POST(req: Request) {
 
     const backgroundImageUrl = state.backgroundImageUrl || (await resolveReportBackgroundImageUrl());
     const footerLogoUrl = state.footerLogoUrl || (await resolveReportFooterLogoUrl());
+    const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
 
     const renderer = resolvePdfRenderer();
     const strictRenderer = isStrictRendererMode();
@@ -225,6 +227,7 @@ export async function POST(req: Request) {
           birthLabel: state.birthLabel,
           backgroundImageUrl,
           footerLogoUrl,
+          sectionDividerImageUrl,
           saju: state.saju,
           report,
         });
@@ -238,6 +241,7 @@ export async function POST(req: Request) {
         birthLabel: state.birthLabel,
         backgroundImageUrl,
         footerLogoUrl,
+        sectionDividerImageUrl,
         saju: state.saju,
         report,
       });

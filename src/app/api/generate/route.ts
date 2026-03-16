@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { mustGetEnv } from "@/lib/env";
+import { getOptionalEnv, mustGetEnv } from "@/lib/env";
 import { generateFallbackHtml } from "@/lib/fallbackHtml";
 import {
   LlmRequestError,
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
     const calendarLabel = input.calendar === "lunar" ? "음력" : "양력";
     const backgroundImageUrl = await resolveReportBackgroundImageUrl();
     const footerLogoUrl = await resolveReportFooterLogoUrl();
+    const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
     const skipLlm = process.env.SKIP_LLM === "true" || process.env.SKIP_GEMINI === "true";
     const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
     const llmDebugTraces: LlmDebugTrace[] = [];
@@ -127,6 +128,7 @@ export async function POST(req: Request) {
           birthLabel,
           backgroundImageUrl,
           footerLogoUrl,
+          sectionDividerImageUrl,
           saju,
           report,
         });
@@ -151,6 +153,7 @@ export async function POST(req: Request) {
               birthLabel,
               backgroundImageUrl,
               footerLogoUrl,
+              sectionDividerImageUrl,
               saju,
               report: report!,
             });
