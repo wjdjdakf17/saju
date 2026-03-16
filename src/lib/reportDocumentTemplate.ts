@@ -132,7 +132,7 @@ const DOC_CSS = `
     --doc-text-muted: #57534e;
     --doc-accent: #44403c;
     --doc-score-fill: #57534e;
-    --doc-font: "Noto Sans KR", system-ui, sans-serif;
+    --doc-font: "Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
     --doc-line-height: 1.85;
     --doc-space: 1.25rem;
     --doc-radius: 12px;
@@ -153,7 +153,7 @@ const DOC_CSS = `
     z-index: 1;
     max-width: 820px;
     margin: 0 auto;
-    padding: 32px 28px 48px;
+    padding: 36px 40px 48px;
   }
   .doc-cover {
     min-height: 260mm;
@@ -182,7 +182,7 @@ const DOC_CSS = `
     background: var(--doc-card-bg);
     border: 1px solid var(--doc-card-border);
     border-radius: var(--doc-radius);
-    padding: 24px 26px;
+    padding: 28px 36px;
     margin-bottom: 20px;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     break-inside: avoid;
@@ -209,25 +209,25 @@ const DOC_CSS = `
   }
   .doc-bulletList-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--doc-text); }
   .doc-bulletList-ul, .doc-orderedList-ol { margin: 0; padding: 0 0 0 20px; list-style: none; }
-  .doc-bulletList-ul { padding-left: 22px; }
+  .doc-bulletList-ul { padding-left: 28px; }
   .doc-bulletList-item, .doc-orderedList-item {
     position: relative;
     margin-bottom: 14px;
-    padding-left: 6px;
+    padding-left: 8px;
     font-size: 14px;
     line-height: 1.9;
     color: var(--doc-text);
   }
   .doc-bulletList-item:last-child, .doc-orderedList-item:last-child { margin-bottom: 0; }
   .doc-bulletList-item::before {
-    content: "";
+    content: "ㅁ";
     position: absolute;
-    left: -18px;
-    top: 0.6em;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--doc-accent);
+    left: -26px;
+    top: 0.05em;
+    font-size: 0.85em;
+    font-weight: 700;
+    color: var(--doc-accent);
+    line-height: 1;
   }
   .doc-orderedList-ol { list-style: decimal; padding-left: 24px; }
   .doc-orderedList-item { list-style: decimal; margin-left: 0; padding-left: 4px; }

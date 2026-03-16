@@ -5,7 +5,7 @@ export const reportContentSchema = z.object({
   summary: z.object({
     oneLine: z.string().min(1).max(200),
     keywords: z.array(z.string().min(1).max(30)).min(6).max(12),
-    highlights: z.array(z.string().min(1).max(120)).min(4).max(10),
+    highlights: z.array(z.string().min(1).max(180)).min(4).max(10),
   }),
   sections: z
     .array(

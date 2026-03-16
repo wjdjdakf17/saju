@@ -74,6 +74,17 @@ export function reportContentToDocument(
     ],
   });
 
+  // ─── 중간 요약 표: 영역별 한눈에 보기 ───
+  blocks.push({
+    type: "table",
+    columns: ["번호", "영역", "요약"],
+    rows: content.sections.map((sec, i) => {
+      const area = titleOnlyFromHeading(sec.heading);
+      const summary = sec.bullets[0]?.replace(/\s+/g, " ").trim().slice(0, 50) ?? "-";
+      return [String(i + 1), area, summary.length >= 50 ? `${summary}…` : summary];
+    }),
+  });
+
   // ─── 14개 섹션 (각각 scoreBlock + bulletList) ───
   for (const sec of content.sections) {
     const score = parseScoreFromHeading(sec.heading);
