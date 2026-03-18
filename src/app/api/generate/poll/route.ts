@@ -44,14 +44,17 @@ function progressOf(state: AsyncGenerateState, totalSteps: number): number {
 
 export async function POST(req: Request) {
   try {
-    const expectedSecret = process.env.WEBHOOK_SECRET;
-    if (!expectedSecret) {
+    const isDev = process.env.NODE_ENV !== "production";
+    const expectedSecret = isDev ? "dev" : process.env.WEBHOOK_SECRET;
+    if (!isDev && !expectedSecret) {
       return NextResponse.json({ error: "server_error", message: "Missing WEBHOOK_SECRET" }, { status: 500 });
     }
 
-    const providedSecret = req.headers.get("x-webhook-secret") || "";
-    if (providedSecret !== expectedSecret) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    if (!isDev) {
+      const providedSecret = req.headers.get("x-webhook-secret") || "";
+      if (providedSecret !== expectedSecret) {
+        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      }
     }
 
     const parsed = pollRequestSchema.safeParse(await req.json());
@@ -64,7 +67,7 @@ export async function POST(req: Request) {
 
     let state: AsyncGenerateState;
     try {
-      state = decodeAsyncStateToken(parsed.data.jobToken, expectedSecret);
+      state = decodeAsyncStateToken(parsed.data.jobToken, expectedSecret || "dev");
     } catch (err) {
       const message = err instanceof Error ? err.message : "invalid_token";
       console.error("[poll] invalid_job_token", message);
@@ -78,7 +81,7 @@ export async function POST(req: Request) {
     const sectionBatches = getReportSectionBatches();
     const totalSteps = getAsyncTotalSteps(sectionBatches.length);
     const enteredAsRenderStage = state.stage === "render";
-    const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
+    const includeDebugOutput = isDev || process.env.REPORT_DEBUG_OUTPUT === "true";
     const stepTraces: LlmDebugTrace[] = [];
     const debugCapture = includeDebugOutput
       ? (trace: LlmDebugTrace) => {
@@ -104,6 +107,7 @@ export async function POST(req: Request) {
           },
         },
         debugCapture,
+        state.input.llm,
       );
 
       state.report.title = summaryPart.title;
@@ -130,6 +134,7 @@ export async function POST(req: Request) {
         },
         state.nextSectionBatchIndex,
         debugCapture,
+        state.input.llm,
       );
 
       state.report.sections.push(...batch.sections);
@@ -157,6 +162,7 @@ export async function POST(req: Request) {
           },
         },
         debugCapture,
+        state.input.llm,
       );
 
       state.report.elementBalance = tailPart.elementBalance;
@@ -173,7 +179,7 @@ export async function POST(req: Request) {
         completedSteps: state.completedSteps,
         totalSteps,
         progressPercent,
-        jobToken: encodeAsyncStateToken(state, expectedSecret),
+        jobToken: encodeAsyncStateToken(state, expectedSecret || "dev"),
       };
       if (includeDebugOutput && stepTraces.length > 0) {
         response.debug = { traces: stepTraces };
@@ -181,10 +187,29 @@ export async function POST(req: Request) {
       return NextResponse.json(response);
     }
 
-    // Ensure exactly 14 sections (pad with fallback if job was started with different batch size or partial run)
-    const sections = [...state.report.sections];
-    while (sections.length < 14) {
-      sections.push(buildFallbackSection(sections.length + 1));
+    const llmInput = {
+      name: state.input.name,
+      gender: state.input.gender,
+      calendar: state.input.calendar,
+      birth: state.input.birth,
+      saju: {
+        fourPillarsKorean: state.saju.fourPillars.korean,
+        fourPillarsHanja: state.saju.fourPillars.hanja,
+        fullKorean: state.saju.fourPillars.fullKorean,
+        fullHanja: state.saju.fourPillars.fullHanja,
+        dayElement: state.saju.dayElement,
+        dayYinYang: state.saju.dayYinYang,
+      },
+    } as const;
+
+    // Ensure exactly 12 sections and never allow undersized bodies through.
+    const sections = [...state.report.sections].map((section, idx) =>
+      section?.body?.trim().length >= 1200 ? section : buildFallbackSection(llmInput, idx + 1),
+    );
+    while (sections.length < 12) {
+      sections.push(
+        buildFallbackSection(llmInput, sections.length + 1),
+      );
     }
     const report = reportContentSchema.parse({
       title: state.report.title || "",
@@ -193,7 +218,7 @@ export async function POST(req: Request) {
         keywords: [],
         highlights: [],
       },
-      sections: sections.slice(0, 14),
+      sections: sections.slice(0, 12),
       elementBalance: state.report.elementBalance || { analysis: "", tips: [] },
       disclaimer: state.report.disclaimer || "",
     });
@@ -201,6 +226,7 @@ export async function POST(req: Request) {
     const backgroundImageUrl = state.backgroundImageUrl || (await resolveReportBackgroundImageUrl());
     const footerLogoUrl = state.footerLogoUrl || (await resolveReportFooterLogoUrl());
     const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
+    const assetBaseUrl = new URL(req.url).origin;
 
     const renderer = resolvePdfRenderer();
     const strictRenderer = isStrictRendererMode();
@@ -220,11 +246,12 @@ export async function POST(req: Request) {
         rendererUsed = "typst";
       } catch (err) {
         if (strictRenderer) throw err;
-        const htmlFallback = renderReportHtml({
+        const htmlFallback = await renderReportHtml({
           name: state.input.name,
           gender: state.input.gender,
           calendarLabel: state.calendarLabel,
           birthLabel: state.birthLabel,
+          assetBaseUrl,
           backgroundImageUrl,
           footerLogoUrl,
           sectionDividerImageUrl,
@@ -234,11 +261,12 @@ export async function POST(req: Request) {
         pdfBytes = await renderPdfFromHtml({ html: htmlFallback });
       }
     } else {
-      const html = renderReportHtml({
+      const html = await renderReportHtml({
         name: state.input.name,
         gender: state.input.gender,
         calendarLabel: state.calendarLabel,
         birthLabel: state.birthLabel,
+        assetBaseUrl,
         backgroundImageUrl,
         footerLogoUrl,
         sectionDividerImageUrl,
@@ -256,6 +284,7 @@ export async function POST(req: Request) {
       pdfBase64,
       meta: {
         renderer: rendererUsed,
+        llm: state.input.llm || null,
         fourPillarsKorean: state.saju.fourPillars.korean,
         fourPillarsHanja: state.saju.fourPillars.hanja,
         dayElement: state.saju.dayElement,

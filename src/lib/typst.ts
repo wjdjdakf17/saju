@@ -42,8 +42,8 @@ function buildTypstDocument_(params: {
   const summaryHighlights = params.report.summary.highlights.map((h) => `- ${escapeTypst_(h)}`).join("\n");
   const sectionBlocks = params.report.sections
     .map((section) => {
-      const bullets = section.bullets.map((b) => `- ${escapeTypst_(b)}`).join("\n");
-      return `== ${escapeTypst_(section.heading)}\n${bullets}`;
+      const body = escapeTypst_(section.body || "");
+      return `== ${escapeTypst_(section.heading)}\n${body}`;
     })
     .join("\n\n");
   const balanceTips = params.report.elementBalance.tips.map((t) => `- ${escapeTypst_(t)}`).join("\n");

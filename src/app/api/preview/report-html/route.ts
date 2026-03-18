@@ -12,20 +12,59 @@ import {
 export const dynamic = "force-dynamic";
 
 /** GET /api/preview/report-html — 샘플 리포트 HTML (로컬 스타일링용) */
-export async function GET() {
+export async function GET(req: Request) {
   const saju = getSampleSaju();
   const backgroundImageUrl = await resolveReportBackgroundImageUrl();
   const footerLogoUrl = await resolveReportFooterLogoUrl();
   const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
+  const assetBaseUrl = new URL(req.url).origin;
 
-  const html = renderReportHtml({
+  let html = await renderReportHtml({
     ...sampleParams,
+    assetBaseUrl,
     backgroundImageUrl,
     footerLogoUrl,
     sectionDividerImageUrl,
     saju,
     report: sampleReportContent,
   });
+
+  const url = new URL(req.url);
+  const debug = url.searchParams.get("debug") === "1";
+  if (debug) {
+    const debugCss = `
+      <style>
+        /* Debug frame for browser preview only */
+        @media screen {
+          html, body { background: #1f1f1f !important; }
+          body { padding: 24px 0 !important; }
+          .doc-pageBg { display: none !important; }
+          .doc-pageFooterLogo { outline: 1px dashed rgba(255,255,255,0.45); outline-offset: 2px; }
+
+          /* A4 page frames */
+          .doc-coverPage,
+          .doc-contentWrap {
+            width: 210mm !important;
+            min-height: 297mm !important;
+            margin: 18px auto !important;
+            background: white;
+            box-shadow: 0 18px 45px rgba(0,0,0,0.45);
+            outline: 1px solid rgba(255,255,255,0.45);
+            outline-offset: 8px;
+            position: relative;
+          }
+
+          /* Show “content safe area” border (approx) */
+          .doc-contentInner {
+            outline: 1px dashed rgba(220, 38, 38, 0.65);
+            outline-offset: 6px;
+          }
+        }
+      </style>
+    `.trim();
+
+    html = html.replace("</head>", `${debugCss}\n</head>`);
+  }
 
   return new NextResponse(html, {
     headers: { "Content-Type": "text/html; charset=utf-8" },

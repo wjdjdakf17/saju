@@ -15,12 +15,18 @@ const birthSchema = z.object({
   minute: z.number().int().min(0).max(59),
 });
 
+const llmConfigSchema = z.object({
+  provider: z.enum(["openai", "gemini"]),
+  model: z.string().min(1).max(80).optional(),
+});
+
 export const generateRequestSchema = z.object({
   name: z.string().min(1).max(50),
   gender: z.string().min(1).max(20),
   calendar: z.enum(["solar", "lunar"]),
   birth: birthSchema,
   isLeapMonth: z.boolean().optional(),
+  llm: llmConfigSchema.optional(),
 });
 
 export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;

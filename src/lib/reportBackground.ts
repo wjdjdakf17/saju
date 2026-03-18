@@ -35,8 +35,8 @@ export async function resolveReportBackgroundImageUrl(): Promise<string | undefi
     return cachedBackgroundDataUrl;
   } catch {
     // Backward compatibility: use legacy env name if local asset is unavailable.
-    return process.env.REPORT_COVER_IMAGE_URL;
   }
+  return process.env.REPORT_COVER_IMAGE_URL;
 }
 
 export async function resolveReportFooterLogoUrl(): Promise<string | undefined> {

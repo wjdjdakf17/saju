@@ -33,6 +33,10 @@ const requestSchema = z.object({
   calendar: z.enum(["solar", "lunar"]),
   birth: birthSchema,
   isLeapMonth: z.boolean().optional(),
+  llm: z.object({
+    provider: z.enum(["openai", "gemini"]),
+    model: z.string().min(1).max(80).optional(),
+  }).optional(),
 });
 
 function sanitizeFileName(name: string): string {
@@ -42,10 +46,13 @@ function sanitizeFileName(name: string): string {
 
 export async function POST(req: Request) {
   try {
-    const expectedSecret = mustGetEnv("WEBHOOK_SECRET");
-    const providedSecret = req.headers.get("x-webhook-secret") || "";
-    if (providedSecret !== expectedSecret) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    const isDev = process.env.NODE_ENV !== "production";
+    if (!isDev) {
+      const expectedSecret = mustGetEnv("WEBHOOK_SECRET");
+      const providedSecret = req.headers.get("x-webhook-secret") || "";
+      if (providedSecret !== expectedSecret) {
+        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      }
     }
 
     const json = await req.json();
@@ -74,8 +81,9 @@ export async function POST(req: Request) {
     const backgroundImageUrl = await resolveReportBackgroundImageUrl();
     const footerLogoUrl = await resolveReportFooterLogoUrl();
     const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
+    const assetBaseUrl = new URL(req.url).origin;
     const skipLlm = process.env.SKIP_LLM === "true" || process.env.SKIP_GEMINI === "true";
-    const includeDebugOutput = process.env.REPORT_DEBUG_OUTPUT === "true";
+    const includeDebugOutput = isDev || process.env.REPORT_DEBUG_OUTPUT === "true";
     const llmDebugTraces: LlmDebugTrace[] = [];
     let report;
 
@@ -100,6 +108,7 @@ export async function POST(req: Request) {
             llmDebugTraces.push(trace);
           }
           : undefined,
+        input.llm,
       );
     }
 
@@ -121,11 +130,12 @@ export async function POST(req: Request) {
         rendererUsed = "typst";
       } catch (err) {
         if (strictRenderer) throw err;
-        const htmlFallback = renderReportHtml({
+        const htmlFallback = await renderReportHtml({
           name: input.name,
           gender: input.gender,
           calendarLabel,
           birthLabel,
+          assetBaseUrl,
           backgroundImageUrl,
           footerLogoUrl,
           sectionDividerImageUrl,
@@ -146,11 +156,12 @@ export async function POST(req: Request) {
               footerLogoUrl,
               saju,
             })
-          : renderReportHtml({
+          : await renderReportHtml({
               name: input.name,
               gender: input.gender,
               calendarLabel,
               birthLabel,
+              assetBaseUrl,
               backgroundImageUrl,
               footerLogoUrl,
               sectionDividerImageUrl,
@@ -168,6 +179,7 @@ export async function POST(req: Request) {
       pdfBase64,
       meta: {
         renderer: rendererUsed,
+        llm: input.llm || null,
         fourPillarsKorean: saju.fourPillars.korean,
         fourPillarsHanja: saju.fourPillars.hanja,
         dayElement: saju.dayElement,

@@ -16,10 +16,13 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
-    const expectedSecret = mustGetEnv("WEBHOOK_SECRET");
-    const providedSecret = req.headers.get("x-webhook-secret") || "";
-    if (providedSecret !== expectedSecret) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    const isDev = process.env.NODE_ENV !== "production";
+    const expectedSecret = isDev ? "dev" : mustGetEnv("WEBHOOK_SECRET");
+    if (!isDev) {
+      const providedSecret = req.headers.get("x-webhook-secret") || "";
+      if (providedSecret !== expectedSecret) {
+        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      }
     }
 
     const json = await req.json();

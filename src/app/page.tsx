@@ -1,8 +1,10 @@
+import LocalTestClient from "@/app/LocalTestClient";
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-50 px-6 py-14 text-zinc-900 dark:bg-black dark:text-zinc-50">
       <main className="mx-auto w-full max-w-3xl">
-        <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        {/* <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <h1 className="text-2xl font-semibold tracking-tight">Saju PDF Generator</h1>
           <p className="mt-2 text-zinc-600 dark:text-zinc-400">
             Google Form → Apps Script → Vercel API에서 만세력 + Gemini HTML → PDF(base64)를 생성합니다.
@@ -32,7 +34,9 @@ Body: { "jobToken": "..." }`}
               비동기 처리 완료 응답은 <span className="font-mono">pdfBase64</span>와 <span className="font-mono">fileName</span>을 포함합니다.
             </p>
           </div>
-        </div>
+        </div> */}
+
+        <LocalTestClient />
       </main>
     </div>
   );

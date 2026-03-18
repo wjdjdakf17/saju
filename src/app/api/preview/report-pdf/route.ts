@@ -14,14 +14,16 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /** GET /api/preview/report-pdf — 샘플 리포트 PDF 다운로드 (로컬 스타일링용) */
-export async function GET() {
+export async function GET(req: Request) {
   const saju = getSampleSaju();
   const backgroundImageUrl = await resolveReportBackgroundImageUrl();
   const footerLogoUrl = await resolveReportFooterLogoUrl();
   const sectionDividerImageUrl = getOptionalEnv("REPORT_SECTION_DIVIDER_IMAGE_URL");
+  const assetBaseUrl = new URL(req.url).origin;
 
-  const html = renderReportHtml({
+  const html = await renderReportHtml({
     ...sampleParams,
+    assetBaseUrl,
     backgroundImageUrl,
     footerLogoUrl,
     sectionDividerImageUrl,
@@ -32,7 +34,7 @@ export async function GET() {
   const pdfBytes = await renderPdfFromHtml({ html });
   const fileName = "sample_saju_report.pdf";
 
-  return new NextResponse(pdfBytes, {
+  return new NextResponse(pdfBytes.buffer as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${fileName}"`,
