@@ -4,12 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type Birth = { year: number; month: number; day: number; hour: number; minute: number };
 type Calendar = "solar" | "lunar";
-type LlmProvider = "openai" | "gemini";
-
-const MODEL_OPTIONS: Record<LlmProvider, string[]> = {
-  openai: ["gpt-5", "gpt-5-mini", "gpt-4o-mini"],
-  gemini: ["gemini-3.1-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
-};
+const GEMINI_MODELS = ["gemini-3.1-flash", "gemini-2.5-flash", "gemini-2.5-pro"] as const;
 
 type StartResponse =
   | { status: "processing"; jobToken: string; progressPercent: number; stage: string; completedSteps: number; totalSteps: number }
@@ -41,27 +36,44 @@ function base64ToBlob(base64: string, mime = "application/pdf") {
   return new Blob([bytes], { type: mime });
 }
 
-function sanitizeLogPayload(payload: unknown): unknown {
-  if (payload == null) return payload;
-  if (typeof payload === "string") {
-    return payload.length > 500 ? `${payload.slice(0, 500)}... [truncated ${payload.length - 500} chars]` : payload;
+function getStageLabel(stage: string, running: boolean, error: string, pdfUrl: string): string {
+  if (error) return "문제가 발생했어요";
+  if (pdfUrl) return "리포트가 완성되었어요";
+  if (!running) return "입력 후 생성 버튼을 눌러주세요";
+
+  switch (stage) {
+    case "summary":
+      return "기본 해석을 준비하고 있어요";
+    case "sections":
+      return "상세 내용을 작성하고 있어요";
+    case "tail":
+      return "마무리 내용을 정리하고 있어요";
+    case "render":
+      return "PDF 파일로 정리하고 있어요";
+    case "completed":
+      return "리포트가 완성되었어요";
+    default:
+      return "리포트를 준비하고 있어요";
   }
-  if (Array.isArray(payload)) {
-    return payload.slice(0, 20).map(sanitizeLogPayload);
+}
+
+function getStageDescription(stage: string, running: boolean, error: string, pdfUrl: string): string {
+  if (error) return "잠시 후 다시 시도해 주세요. 문제가 계속되면 관리자에게 문의해 주세요.";
+  if (pdfUrl) return "아래 버튼으로 PDF를 바로 다운로드할 수 있습니다.";
+  if (!running) return "정보를 입력하면 개인 맞춤 사주 리포트를 바로 생성할 수 있습니다.";
+
+  switch (stage) {
+    case "summary":
+      return "사주의 전체 흐름과 핵심 키워드를 분석하고 있습니다.";
+    case "sections":
+      return "성격, 운세, 오행 등 각 장의 내용을 순서대로 작성하고 있습니다.";
+    case "tail":
+      return "요약과 주의사항, 마지막 안내 문구를 정리하고 있습니다.";
+    case "render":
+      return "완성된 내용을 보기 좋은 PDF 형식으로 변환하고 있습니다.";
+    default:
+      return "조금만 기다려 주세요. 보통 잠시 후 다음 단계로 넘어갑니다.";
   }
-  if (typeof payload === "object") {
-    const entries = Object.entries(payload as Record<string, unknown>).map(([key, value]) => {
-      if (key === "pdfBase64" && typeof value === "string") {
-        return [key, `[omitted base64 payload: ${value.length} chars]`];
-      }
-      if ((key === "html" || key === "body") && typeof value === "string" && value.length > 500) {
-        return [key, `${value.slice(0, 500)}... [truncated ${value.length - 500} chars]`];
-      }
-      return [key, sanitizeLogPayload(value)];
-    });
-    return Object.fromEntries(entries);
-  }
-  return payload;
 }
 
 export default function LocalTestClient() {
@@ -69,19 +81,16 @@ export default function LocalTestClient() {
   const [gender, setGender] = useState("남자");
   const [calendar, setCalendar] = useState<Calendar>("solar");
   const [birth, setBirth] = useState<Birth>({ year: 1995, month: 10, day: 7, hour: 10, minute: 0 });
-  const [llmProvider, setLlmProvider] = useState<LlmProvider>("openai");
-  const [llmModel, setLlmModel] = useState("gpt-5");
+  const [llmModel, setLlmModel] = useState<string>(GEMINI_MODELS[0]);
 
   const [running, setRunning] = useState(false);
   const [stage, setStage] = useState<string>("-");
   const [progress, setProgress] = useState<number>(0);
   const [completedSteps, setCompletedSteps] = useState<number>(0);
   const [totalSteps, setTotalSteps] = useState<number>(0);
-  const [jobToken, setJobToken] = useState<string>("");
   const [pdfUrl, setPdfUrl] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
   const [error, setError] = useState<string>("");
-  const [logs, setLogs] = useState<Array<{ t: string; label: string; payload: unknown }>>([]);
   const [verifyName, setVerifyName] = useState("김태윤");
   const [verifyBirthDate, setVerifyBirthDate] = useState("1995-10-07");
   const [verifyBirthTime, setVerifyBirthTime] = useState("10:00");
@@ -91,10 +100,6 @@ export default function LocalTestClient() {
   const [verifyResponse, setVerifyResponse] = useState<unknown>(null);
 
   const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    setLlmModel(MODEL_OPTIONS[llmProvider][0]);
-  }, [llmProvider]);
 
   const canStart = useMemo(() => {
     return (
@@ -108,9 +113,11 @@ export default function LocalTestClient() {
     );
   }, [name, gender, birth]);
 
-  const pushLog = (label: string, payload: unknown) => {
-    setLogs((prev) => [{ t: new Date().toISOString(), label, payload: sanitizeLogPayload(payload) }, ...prev].slice(0, 80));
-  };
+  const stageLabel = useMemo(() => getStageLabel(stage, running, error, pdfUrl), [stage, running, error, pdfUrl]);
+  const stageDescription = useMemo(
+    () => getStageDescription(stage, running, error, pdfUrl),
+    [stage, running, error, pdfUrl],
+  );
 
   const canVerify = useMemo(() => {
     return (
@@ -181,9 +188,7 @@ export default function LocalTestClient() {
     setProgress(0);
     setCompletedSteps(0);
     setTotalSteps(0);
-    setJobToken("");
     setError("");
-    setLogs([]);
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setPdfUrl("");
     setFileName("");
@@ -207,18 +212,16 @@ export default function LocalTestClient() {
           calendar,
           birth,
           isLeapMonth: false,
-          llm: { provider: llmProvider, model: llmModel.trim() || undefined },
+          llm: { provider: "gemini", model: llmModel.trim() || undefined },
         }),
         signal: controller.signal,
       });
       const data = (await res.json()) as StartResponse;
-      pushLog("start.response", data);
 
       if (!res.ok || "error" in data) {
         throw new Error(("message" in data && data.message) || `start_failed:${res.status}`);
       }
 
-      setJobToken(data.jobToken);
       setStage(data.stage);
       setProgress(data.progressPercent);
       setCompletedSteps(data.completedSteps);
@@ -235,7 +238,6 @@ export default function LocalTestClient() {
           signal: controller.signal,
         });
         const pdata = (await pres.json()) as PollResponse;
-        pushLog("poll.response", pdata);
 
         if (!pres.ok || ("error" in pdata && pdata.error)) {
           throw new Error(("message" in pdata && pdata.message) || `poll_failed:${pres.status}`);
@@ -243,7 +245,6 @@ export default function LocalTestClient() {
 
         if ("status" in pdata && pdata.status === "processing") {
           token = pdata.jobToken;
-          setJobToken(token);
           setStage(pdata.stage);
           setProgress(pdata.progressPercent);
           setCompletedSteps(pdata.completedSteps);
@@ -270,7 +271,6 @@ export default function LocalTestClient() {
       setError(msg);
       setRunning(false);
       abortRef.current = null;
-      pushLog("client.error", { message: msg, stack: e instanceof Error ? e.stack : undefined });
     }
   };
 
@@ -279,9 +279,9 @@ export default function LocalTestClient() {
       <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">로컬 생성 테스트</h2>
+            <h2 className="text-lg font-semibold">사주 리포트 생성</h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              폼 없이 바로 생성합니다. 진행률/단계/응답 로그를 모두 보여줍니다.
+              고객 정보를 입력하면 Gemini로 사주 리포트를 생성하고 PDF로 내려받을 수 있습니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -290,21 +290,21 @@ export default function LocalTestClient() {
               onClick={reset}
               disabled={running}
             >
-              Reset
+              초기화
             </button>
             <button
               className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-white"
               onClick={start}
               disabled={!canStart || running}
             >
-              {running ? "Running..." : "Start"}
+              {running ? "생성 중..." : "리포트 생성"}
             </button>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
               onClick={stop}
               disabled={!running}
             >
-              Stop
+              중지
             </button>
           </div>
         </div>
@@ -340,15 +340,10 @@ export default function LocalTestClient() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">LLM Provider</div>
-                <select
-                  value={llmProvider}
-                  onChange={(e) => setLlmProvider(e.target.value as LlmProvider)}
-                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <option value="openai">OpenAI</option>
-                  <option value="gemini">Gemini</option>
-                </select>
+                <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">LLM</div>
+                <div className="mt-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+                  Gemini
+                </div>
               </div>
               <div>
                 <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Model</div>
@@ -357,7 +352,7 @@ export default function LocalTestClient() {
                   onChange={(e) => setLlmModel(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 >
-                  {MODEL_OPTIONS[llmProvider].map((model) => (
+                  {GEMINI_MODELS.map((model) => (
                     <option key={model} value={model}>
                       {model}
                     </option>
@@ -385,31 +380,28 @@ export default function LocalTestClient() {
           <div className="space-y-3">
             <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium">진행 상황</div>
+                <div className="text-sm font-medium">리포트 제작 상태</div>
                 <div className="text-sm tabular-nums text-zinc-700 dark:text-zinc-300">{progress}%</div>
               </div>
               <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
                 <div className="h-full bg-zinc-900 dark:bg-zinc-50" style={{ width: `${progress}%` }} />
               </div>
+              <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{stageLabel}</div>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{stageDescription}</p>
+              </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-600 dark:text-zinc-400">
                 <div>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-300">stage</span>: {stage}
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">진행 단계</span>: {completedSteps}/{totalSteps || 0}
                 </div>
                 <div>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-300">steps</span>: {completedSteps}/{totalSteps}
-                </div>
-                <div>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-300">llm</span>: {llmProvider}/{llmModel}
-                </div>
-                <div className="col-span-2 break-all">
-                  <span className="font-medium text-zinc-700 dark:text-zinc-300">jobToken</span>:{" "}
-                  {jobToken ? jobToken.slice(0, 48) + "…" : "-"}
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">선택 모델</span>: {llmModel}
                 </div>
               </div>
 
               {error ? (
                 <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
-                  {error}
+                  생성 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.
                 </div>
               ) : null}
 
@@ -427,28 +419,6 @@ export default function LocalTestClient() {
                   </a>
                 </div>
               ) : null}
-            </div>
-
-            <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium">로그 (최근 200개)</div>
-                <button
-                  className="text-xs text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-                  onClick={() => setLogs([])}
-                  type="button"
-                >
-                  Clear
-                </button>
-              </div>
-              <div className="max-h-[360px] overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
-                <pre className="whitespace-pre-wrap wrap-break-word">
-                  {logs.length
-                    ? logs
-                        .map((l) => `--- ${l.t} ${l.label} ---\n${JSON.stringify(l.payload, null, 2)}`)
-                        .join("\n\n")
-                    : "(no logs yet)"}
-                </pre>
-              </div>
             </div>
           </div>
         </div>
