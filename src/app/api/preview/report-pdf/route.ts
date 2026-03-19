@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isAuthorizedRequest } from "@/lib/auth";
 import { getOptionalEnv } from "@/lib/env";
 import { renderPdfFromHtml } from "@/lib/pdf";
 import { renderReportHtml } from "@/lib/reportTemplate";
@@ -15,6 +16,10 @@ export const maxDuration = 60;
 
 /** GET /api/preview/report-pdf — 샘플 리포트 PDF 다운로드 (로컬 스타일링용) */
 export async function GET(req: Request) {
+  if (!isAuthorizedRequest(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   const saju = getSampleSaju();
   const backgroundImageUrl = await resolveReportBackgroundImageUrl();
   const footerLogoUrl = await resolveReportFooterLogoUrl();

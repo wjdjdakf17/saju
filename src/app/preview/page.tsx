@@ -1,6 +1,8 @@
-"use client";
+import { requireAuthenticatedPage } from "@/lib/auth";
 
-export default function PreviewPage() {
+export default async function PreviewPage() {
+  await requireAuthenticatedPage("/preview");
+
   return (
     <div className="min-h-screen bg-zinc-100 p-6">
       <div className="mx-auto max-w-lg space-y-4">

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { isAuthorizedRequest } from "@/lib/auth";
 import {
   decodeAsyncStateToken,
   encodeAsyncStateToken,
@@ -46,15 +47,11 @@ export async function POST(req: Request) {
   try {
     const isDev = process.env.NODE_ENV !== "production";
     const expectedSecret = isDev ? "dev" : process.env.WEBHOOK_SECRET;
-    if (!isDev && !expectedSecret) {
-      return NextResponse.json({ error: "server_error", message: "Missing WEBHOOK_SECRET" }, { status: 500 });
+    if (!isAuthorizedRequest(req)) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-
-    if (!isDev) {
-      const providedSecret = req.headers.get("x-webhook-secret") || "";
-      if (providedSecret !== expectedSecret) {
-        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-      }
+    if (!expectedSecret) {
+      return NextResponse.json({ error: "server_error", message: "Missing WEBHOOK_SECRET" }, { status: 500 });
     }
 
     const parsed = pollRequestSchema.safeParse(await req.json());

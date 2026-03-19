@@ -6,7 +6,8 @@ import {
   getAsyncTotalSteps,
   type AsyncGenerateState,
 } from "@/lib/asyncJob";
-import { mustGetEnv } from "@/lib/env";
+import { isAuthorizedRequest } from "@/lib/auth";
+import { getOptionalEnv } from "@/lib/env";
 import { getReportSectionBatches } from "@/lib/llm";
 import { computeSaju } from "@/lib/saju";
 
@@ -16,13 +17,14 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
+    if (!isAuthorizedRequest(req)) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
     const isDev = process.env.NODE_ENV !== "production";
-    const expectedSecret = isDev ? "dev" : mustGetEnv("WEBHOOK_SECRET");
-    if (!isDev) {
-      const providedSecret = req.headers.get("x-webhook-secret") || "";
-      if (providedSecret !== expectedSecret) {
-        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-      }
+    const expectedSecret = isDev ? "dev" : getOptionalEnv("WEBHOOK_SECRET");
+    if (!expectedSecret) {
+      return NextResponse.json({ error: "server_error", message: "Missing WEBHOOK_SECRET" }, { status: 500 });
     }
 
     const json = await req.json();

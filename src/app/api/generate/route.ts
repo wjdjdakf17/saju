@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { isAuthorizedRequest } from "@/lib/auth";
 import { getOptionalEnv, mustGetEnv } from "@/lib/env";
 import { generateFallbackHtml } from "@/lib/fallbackHtml";
 import {
@@ -47,12 +48,12 @@ function sanitizeFileName(name: string): string {
 export async function POST(req: Request) {
   try {
     const isDev = process.env.NODE_ENV !== "production";
-    if (!isDev) {
-      const expectedSecret = mustGetEnv("WEBHOOK_SECRET");
-      const providedSecret = req.headers.get("x-webhook-secret") || "";
-      if (providedSecret !== expectedSecret) {
-        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-      }
+    if (!isAuthorizedRequest(req)) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    if (!mustGetEnv("WEBHOOK_SECRET")) {
+      return NextResponse.json({ error: "server_error", message: "Missing WEBHOOK_SECRET" }, { status: 500 });
     }
 
     const json = await req.json();
