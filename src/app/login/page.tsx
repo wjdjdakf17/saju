@@ -1,11 +1,15 @@
-"use client";
+type LoginPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
-import { useSearchParams } from "next/navigation";
+function getSingleParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
-export default function LoginPage() {
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
-  const hasError = searchParams.get("error") === "1";
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = searchParams ? await searchParams : undefined;
+  const next = getSingleParam(params?.next) || "/";
+  const hasError = getSingleParam(params?.error) === "1";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 py-16 text-zinc-50">
