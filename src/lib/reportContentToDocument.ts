@@ -25,11 +25,20 @@ function chapterTitleImageSrc(chapterNumber: number): string {
   return `src/asset/images/title/${chapterNumber}.png`;
 }
 
-function pushStructuredParagraphs(blocks: Block[], body: string, name: string): void {
+type PushParagraphsOpts = { collapseInnerNewlines?: boolean };
+
+function pushStructuredParagraphs(blocks: Block[], body: string, name: string, opts?: PushParagraphsOpts): void {
+  const collapseInner = opts?.collapseInnerNewlines === true;
   const normalized = ensureNameAtSectionStart(body, name)
     .replace(/\r\n/g, "\n")
     .split(/\n{2,}/)
-    .map((part) => part.trim())
+    .map((part) => {
+      let t = part.trim();
+      if (collapseInner && t) {
+        t = t.replace(/\s*\n\s*/g, " ").replace(/ {2,}/g, " ").trim();
+      }
+      return t;
+    })
     .filter(Boolean);
 
   const seen = new Set<string>();
@@ -290,6 +299,10 @@ export function reportContentToDocument(
   const SIBIUNSEONG_ROW_INDEX = 6; // 십이운성 행
   const SIBISINSAL_CHAPTER_INDEX = 5; // 6장 = sections[5] = 십이신살 및 귀인 분석
   const SIBISINSAL_GWIN_ROW_INDICES = [7, 8]; // 십이신살, 귀인 행
+  const LOVE_CHAPTER_INDEX = 6; // 7장 = sections[6] = 연애운 및 결혼운 분석
+  const WEALTH_CHAPTER_INDEX = 7; // 8장 = sections[7] = 재물운 분석
+  const CAREER_CHAPTER_INDEX = 8; // 9장 = sections[8] = 직업운 분석
+  const HEALTH_CHAPTER_INDEX = 9; // 10장 = sections[9] = 건강운 분석
   const DAEWOON_CHAPTER_INDEX = 10; // 11장 = sections[10] = 나의 대운
   const YEONUN_CHAPTER_INDEX = 11; // 12장 = sections[11] = 나의 6년간 연운
   for (let i = 2; i < content.sections.length; i++) {
@@ -359,7 +372,7 @@ export function reportContentToDocument(
       if (sec.body?.trim()) {
         const { intro, items } = splitDaewoonBody(sec.body);
         if (intro) {
-          pushStructuredParagraphs(blocks, intro, params.name);
+          pushStructuredParagraphs(blocks, intro, params.name, { collapseInnerNewlines: true });
         }
 
         daewoonTableData.columns.forEach((col, idx) => {
@@ -379,7 +392,7 @@ export function reportContentToDocument(
 
           const itemBody = items[idx];
           if (itemBody) {
-            pushStructuredParagraphs(blocks, itemBody, params.name);
+            pushStructuredParagraphs(blocks, itemBody, params.name, { collapseInnerNewlines: true });
           }
         });
         continue;
@@ -405,7 +418,7 @@ export function reportContentToDocument(
       if (sec.body?.trim()) {
         const { intro, items } = splitYeonunBody(sec.body, yeonunTableData.columns.map((col) => col.year));
         if (intro) {
-          pushStructuredParagraphs(blocks, intro, params.name);
+          pushStructuredParagraphs(blocks, intro, params.name, { collapseInnerNewlines: true });
         }
 
         yeonunTableData.columns.forEach((col, idx) => {
@@ -428,14 +441,26 @@ export function reportContentToDocument(
 
           const itemBody = items[idx];
           if (itemBody) {
-            pushStructuredParagraphs(blocks, itemBody, params.name);
+            pushStructuredParagraphs(blocks, itemBody, params.name, { collapseInnerNewlines: true });
           }
         });
         continue;
       }
     }
     if (sec.body?.trim()) {
-      pushStructuredParagraphs(blocks, sec.body, params.name);
+      pushStructuredParagraphs(blocks, sec.body, params.name, {
+        collapseInnerNewlines:
+          i === ILJU_CHAPTER_INDEX ||
+          i === SIPSEONG_CHAPTER_INDEX ||
+          i === SIBIUNSEONG_CHAPTER_INDEX ||
+          i === SIBISINSAL_CHAPTER_INDEX ||
+          i === LOVE_CHAPTER_INDEX ||
+          i === WEALTH_CHAPTER_INDEX ||
+          i === CAREER_CHAPTER_INDEX ||
+          i === HEALTH_CHAPTER_INDEX ||
+          i === DAEWOON_CHAPTER_INDEX ||
+          i === YEONUN_CHAPTER_INDEX,
+      });
     }
   }
 

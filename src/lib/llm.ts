@@ -2,7 +2,14 @@ import { z } from "zod";
 
 import { mustGetEnv } from "@/lib/env";
 import { reportContentSchema, type ReportContent } from "@/lib/reportSchema";
-import { computeDaewoonTable, computeSajuExtended, computeYeonunTable } from "@/lib/sajuExtended";
+import { type FiveElement } from "manseryeok";
+
+import {
+  computeDaewoonTable,
+  computeSajuExtended,
+  computeYeonunTable,
+  type YeonunColumn,
+} from "@/lib/sajuExtended";
 
 export type LlmGenerateInput = {
   name: string;
@@ -274,21 +281,417 @@ function buildNarrativeStyleGuide(input: LlmGenerateInput): string[] {
   ];
 }
 
+/** 일간·일지 음양+오행을 샘플 형식(예: 양금(陽金))으로 고정 표기 */
+function formatYinyangElementKoHanja(yinYang: "양" | "음", elementKo: string): string {
+  const elH: Record<string, string> = { 목: "木", 화: "火", 토: "土", 금: "金", 수: "水" };
+  const yyH = yinYang === "양" ? "陽" : "陰";
+  const h = elH[elementKo] ?? "";
+  return `${yinYang}${elementKo}(${yyH}${h})`;
+}
+
+/** 십이운성 한글명 → 한자 병기(샘플·PDF 가독성) */
+/** 십성 한글명 → 한자 병기(대운·연운 세부 본문 가독성) */
+function formatSipseongKoHanja(ko: string): string {
+  const h: Record<string, string> = {
+    비견: "비견(比肩)",
+    겁재: "겁재(劫財)",
+    식신: "식신(食神)",
+    상관: "상관(傷官)",
+    편재: "편재(偏財)",
+    정재: "정재(正財)",
+    편관: "편관(偏官)",
+    정관: "정관(正官)",
+    편인: "편인(偏印)",
+    정인: "정인(正印)",
+  };
+  return h[ko] ?? ko;
+}
+
+const ELEMENT_ORDER: FiveElement[] = ["목", "화", "토", "금", "수"];
+const ELEMENT_HANJA_MAP: Record<FiveElement, string> = { 목: "木", 화: "火", 토: "土", 금: "金", 수: "水" };
+const ELEMENT_KO: Record<FiveElement, string> = { 목: "목", 화: "화", 토: "토", 금: "금", 수: "수" };
+
+function stemElementFullLabel(stemKorean: string, stemHanja: string, el: FiveElement): string {
+  return `${stemKorean}${el}(${stemHanja}${ELEMENT_HANJA_MAP[el]})`;
+}
+
+/** 일간 오행과 대운 천간·지지 오행의 상생·상극을 건강·역량·환경 맥락으로 서술 */
+function daewoonElementRelationParagraph(
+  name: string,
+  dayEl: FiveElement,
+  dwEl: FiveElement,
+  dwLabel: string,
+  slot: "천간" | "지지",
+  dayStemFull: string,
+): string {
+  const dayRef = dayStemFull.trim() || `일간 ${ELEMENT_KO[dayEl]}`;
+  const di = ELEMENT_ORDER.indexOf(dayEl);
+  const wi = ELEMENT_ORDER.indexOf(dwEl);
+  const focusStem =
+    slot === "천간"
+      ? "역량·판단·학습 몰입·창의적 활동으로 드러나기 쉽고, 스스로를 표현하고 성과를 만드는 데 에너지가 모이기 쉽습니다."
+      : "생활 터전·재정·업무 환경·관계의 분위기로 드러나기 쉽고, 현실적인 기반을 다지고 안정감을 쌓으려는 흐름이 강해질 수 있습니다.";
+  if (di < 0 || wi < 0) {
+    return `${dwLabel}은(는) ${name}님의 일상 리듬과 맞물릴 때 컨디션 차이가 커질 수 있으니, 수면과 식사를 먼저 고정하는 편이 좋습니다.`;
+  }
+  const next = (a: number) => (a + 1) % 5;
+  const ctrl = (a: number) => (a + 2) % 5;
+  if (di === wi) {
+    return `${dwLabel}은(는) ${dayRef}과(와) 같은 오행 계열로 맞닿아 있어 ${focusStem} 다만 한쪽으로만 몰리면 피로가 빨리 쌓일 수 있으니 속도 조절이 필요합니다.`;
+  }
+  if (wi === next(di)) {
+    return `${dwLabel}은(는) ${name}님의 ${dayRef}과(와) 상생(相生) 관계에 있습니다. ${ELEMENT_KO[dayEl]}이(가) ${ELEMENT_KO[dwEl]}을(를) 생(生)한다는 흐름으로 읽을 수 있어, ${name}님께서 이 시기에 능력과 에너지를 발휘해 무언가를 이루기에 유리한 리듬입니다. 특히 ${slot === "천간" ? "학업·자기 계발·창의적 활동" : "재물·생활 기반"}에서 긍정적인 성과를 기대해볼 수 있으나, 상생이 지나치면 에너지가 소진될 수 있으니 무리하지 않는 것이 중요합니다.`;
+  }
+  if (di === next(wi)) {
+    return `${dwLabel}은(는) ${dayRef}과(와) 상생(相生) 관계에 있습니다. ${ELEMENT_KO[dwEl]}이(가) ${ELEMENT_KO[dayEl]}을(를) 생해 주는 흐름이므로 ${slot === "지지" ? "재물적으로 안정감을 얻으려는 기운이 붙기 쉽고" : "내면의 지지와 회복이 따라붙기 쉽고"}, 현실적인 준비를 차곡차곡 쌓을 때 만족도가 커질 수 있습니다. 다만 과도한 욕심이나 계획 없는 확장은 안정감을 흔들 수 있으니 우선순위를 분명히 하세요.`;
+  }
+  if (wi === ctrl(di)) {
+    return `${dwLabel}이(가) ${dayRef}과(와) 상극(相剋)으로 맞닿을 여지가 있어, ${slot === "천간" ? "결정과 실행" : "환경·관계"}에서 긴장이 커질 수 있습니다. 무리한 확장보다 정리와 점검에 에너지를 쓰는 편이 안전합니다.`;
+  }
+  if (di === ctrl(wi)) {
+    return `${dwLabel}은(는) ${dayRef}이(가) 다스리고 정리할 수 있는 흐름으로 읽힐 수 있어, 부담을 줄이고 체계를 잡을 때 컨디션이 나아질 수 있습니다. 과로만 피하면 회복에도 유리한 방향입니다.`;
+  }
+  return `${dwLabel}은(는) ${name}님의 ${dayRef}과(와) 중간 톤으로 맞물리므로, 생활 습관을 주간 단위로 점검하면 균형을 유지하기 좋습니다.`;
+}
+
+function formatSibiunseongKoHanja(ko: string): string {
+  const h: Record<string, string> = {
+    장생: "장생(長生)",
+    목욕: "목욕(沐浴)",
+    관대: "관대(冠帶)",
+    건록: "건록(建祿)",
+    제왕: "제왕(帝旺)",
+    쇠: "쇠(衰)",
+    병: "병(病)",
+    사: "사(死)",
+    묘: "묘(墓)",
+    절: "절(絕)",
+    태: "태(胎)",
+    양: "양(養)",
+  };
+  return h[ko] ?? ko;
+}
+
+/** 대운 칸 폴백: 천간 십성별 서술(식신만 특화하지 않도록 분기) */
+function daewoonSipseongStemParagraph(name: string, ko: string): string {
+  const h = formatSipseongKoHanja(ko);
+  const tail: Record<string, string> = {
+    비견: `${ko}은(는) 나와 비슷한 기운이 겹치는 십성으로, 이 시기에는 동료·친구 관계와 자기 주장이 동시에 강해질 수 있습니다. 협력과 경쟁 사이에서 균형을 잡고, 고집만 앞세우지 않도록 대화로 기대치를 맞추면 관계 손실을 줄일 수 있습니다.`,
+    겁재: `${ko}은(는) 경쟁과 자원 분배가 겹치기 쉬운 십성입니다. 이 시기에는 주변과의 속도 차이가 커질 수 있으니, 무리한 승부보다 역할을 분명히 하고 손익을 투명히 나누는 편이 안전합니다.`,
+    식신: `${ko}은(는) 자신의 역량을 활용해 새로운 것을 창출하거나 나누는 에너지로 읽힙니다. ${name}님이 재능을 발휘해 인정받는 흐름이 붙기 쉬우며, 지나치게 경쟁적으로만 나가기보다 여유와 소통을 섞으면 관계에서도 긍정적인 반응을 기대해볼 수 있습니다.`,
+    상관: `${ko}은(는) 표현·비판·창의가 강해지기 쉬운 십성입니다. 이 시기에는 말과 태도가 결과에 직접 영향을 줄 수 있으니, 속도를 조금 늦추고 상대 입장을 확인하는 습관이 갈등을 줄이는 데 도움이 됩니다.`,
+    편재: `${ko}은(는) 기회와 변동이 섞인 재물 흐름으로 읽힙니다. 수입원을 다각화하거나 단기 성과를 노릴 여지가 있으나, 충동적 지출과 과도한 레버리지는 피하는 편이 좋습니다.`,
+    정재: `${ko}은(는) 규칙과 루틴을 통해 쌓이는 재물 기운에 가깝습니다. 꾸준한 직무·계약·저축 같은 안정형 선택이 만족도를 높일 수 있고, 서두르기보다 약속을 지키는 태도가 신뢰로 이어집니다.`,
+    편관: `${ko}은(는) 압박과 변화가 동시에 올 수 있는 십성입니다. 책임이 커질 때 컨디션 관리가 중요하며, 규칙을 활용해 리스크를 줄이면 오히려 실력으로 인정받기 쉽습니다.`,
+    정관: `${ko}은(는) 질서·평가·사회적 기준과 맞닿기 쉬운 십성입니다. 이 시기에는 규범을 지키며 성과를 쌓는 방식이 유리하고, 약속과 보고를 명확히 하면 신뢰가 따라붙기 쉽습니다.`,
+    편인: `${ko}은(는) 직관·학습·내면의 탐구가 강해질 수 있는 십성입니다. 새로운 방식을 시도하거나 깊이 공부하기 좋은 흐름이나, 고민이 길어지면 에너지가 소모되므로 기록과 휴식으로 균형을 잡는 편이 좋습니다.`,
+    정인: `${ko}은(는) 배움과 보호·지지를 받는 구조로 읽히기 쉽습니다. 멘토·자격·체계적인 공부에 도움이 될 수 있으나, 지나치게 타인의 기준에만 맞추면 속도가 느려질 수 있으니 자기 목표를 함께 적어 두면 좋습니다.`,
+  };
+  const body = tail[ko] ?? `${ko}은(는) 이 시기에 역할 수행 방식과 판단 기준에 영향을 주기 쉬운 십성입니다. 상황에 맞게 속도를 조절하고, 피로 신호를 놓치지 않는 편이 좋습니다.`;
+  return `천간의 십성은 ${h}입니다. ${body}`;
+}
+
+/** 대운 칸 폴백: 지지 십성별 서술 */
+function daewoonSipseongBranchParagraph(name: string, ko: string): string {
+  const h = formatSipseongKoHanja(ko);
+  const tail: Record<string, string> = {
+    비견: `${ko}은(는) 내면의 자존감과 반복되는 생활 패턴에 스며들기 쉽습니다. 주변과 비교하느라 에너지가 새지 않도록, 나만의 기준과 루틴을 먼저 고정하는 편이 좋습니다.`,
+    겁재: `${ko}은(는) 관계·자원에서 경쟁이나 마찰이 생기기 쉬운 바탕으로 읽힐 수 있습니다. 경계를 명확히 하되 대립만 키우지 않도록 중재와 합의 타이밍을 의식하면 안정감이 커집니다.`,
+    식신: `${ko}은(는) 일상 속 취미·표현·돌봄이 강조되는 흐름입니다. 사람들과 나누는 활동이 정서를 풍성하게 하고, 관계에서도 부드러운 인상을 남기기 쉽습니다.`,
+    상관: `${ko}은(는) 말과 행동이 감정선에 바로 닿기 쉬운 십성입니다. 즉흥적 반응이 오해를 부를 수 있으니, 중요한 대화는 시간을 두고 정리해 전달하는 습관이 도움이 됩니다.`,
+    편재: `${ko}은(는) 지출·투자·외부 기회가 들뜨기 쉬운 패턴입니다. 현금 흐름을 주간 단위로 점검하고, 검증 없는 확장은 피하면 재정 안정에 유리합니다.`,
+    정재: `${ko}은(는) 생활 터전과 재정의 기반이 단단해지기를 원하는 흐름입니다. 장기 계약·저축·주거 같은 현실 기반을 다지면 심리적 안정도 함께 따라올 수 있습니다.`,
+    편관: `${ko}은(는) 환경 변화와 압박이 몰릴 수 있는 지지 십성입니다. 몸의 신호를 먼저 돌보고, 책임 범위를 조정할 수 있는지 점검하는 것이 과로를 줄이는 지름길입니다.`,
+    정관: `${ko}은(는) 규칙·평가·가문·조직 같은 틀과 맞닿기 쉽습니다. 약속과 역할을 지키면 신뢰가 쌓이고, 무리한 의무 수락은 피로를 키울 수 있으니 선을 분명히 하세요.`,
+    편인: `${ko}은(는) 직관과 창의, 깊은 학습 욕구가 올라오기 쉬운 십성입니다. 새로운 관점을 시도하기 좋으나, 의심과 고민이 길어지면 에너지가 소모되므로 스스로 균형을 맞추는 것이 필요합니다.`,
+    정인: `${ko}은(는) 배움과 보호의 기운이 환경 쪽에서 강조될 수 있습니다. 스승·제도·자료를 활용하면 성장에 도움이 되고, 정보 과잉만 피하면 몰입도가 높아집니다.`,
+  };
+  const body = tail[ko] ?? `${ko}은(는) 감정선과 반복 생활 패턴을 만드는 바탕으로, ${name}님의 일상 리듬과 맞물릴 때 체감 차이가 커질 수 있습니다.`;
+  return `지지의 십성은 ${h}입니다. ${body}`;
+}
+
+/** 천간·지지 한글 + 오행 한글(병화, 오화 등) */
+function stemBranchElementCompound(char: string, el: FiveElement): string {
+  return `${char}${ELEMENT_KO[el]}`;
+}
+
+const YEONUN_STEM_ELEMENT_LINE: Record<FiveElement, string> = {
+  목: "봄을 닮아 뻗어 나가는 성장과 시작의 기운을 품습니다.",
+  화: "태양에 가까운 밝음과 열기로 활력과 대외적 표현을 상징합니다.",
+  토: "중심을 잡아 주는 안정과 현실감을 드러내기 쉽습니다.",
+  금: "단단한 결실과 기준, 절제된 힘을 나타냅니다.",
+  수: "깊고 넓은 흐름과 유연한 적응, 내면의 지혜를 품습니다.",
+};
+
+const YEONUN_BRANCH_ELEMENT_LINE: Record<FiveElement, string> = {
+  목: "환경 속 성장과 확장의 리듬이 살아나기 쉽습니다.",
+  화: "활동·교류·표현이 두드러지는 한여름 같은 생동감을 띠기 쉽습니다.",
+  토: "생활 터전과 현실 과제가 중심에 서기 쉽습니다.",
+  금: "정리·평가·원칙이 강조되는 분위기로 읽힐 수 있습니다.",
+  수: "변화와 정보, 감정의 파동이 잦아질 여지가 있습니다.",
+};
+
+function yeonunStemSipseongBridge(name: string, stemCompound: string, ko: string): string {
+  const h = formatSipseongKoHanja(ko);
+  const m: Record<string, string> = {
+    비견: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 겹치므로, 자기 주장과 동료·친구 관계가 동시에 부각될 수 있습니다. 협력과 경쟁 사이에서 기대치를 말로 맞추면 마찰을 줄이기 좋습니다.`,
+    겁재: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 자원·역할 분배에서 긴장이 생기기 쉽습니다. 승부보다 규칙과 범위를 먼저 정리하면 에너지 소모를 줄일 수 있습니다.`,
+    식신: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 재능을 드러내고 나누는 흐름이 강해질 수 있습니다. 여유와 소통을 섞으면 인정받는 속도가 붙기 쉽습니다.`,
+    상관: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 표현·비판·창의가 앞으로 나오기 쉽습니다. 말과 태도의 온도를 조절하면 결과가 좋아집니다.`,
+    편재: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 기회와 변동이 섞인 재물 흐름이 붙기 쉽습니다. 검증 없는 확장과 충동 지출만 피하면 수익 구조를 넓히기 좋습니다.`,
+    정재: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 약속·루틴·계약을 통해 쌓이는 안정형 재물 기운이 강해질 수 있습니다.`,
+    편관: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용하기 때문에 책임감과 도전의식이 자연스레 강화될 수 있습니다. 새로운 책임이 따라올 수 있으니 범위와 기한을 먼저 조율하면 성장으로 이어지기 쉽습니다.`,
+    정관: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용하기 때문에 규범·평가·약속 이행이 중요한 해로 읽힐 수 있습니다. 신뢰를 쌓으면 기회로 돌아오기 쉽습니다.`,
+    편인: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 직관·학습·내면 탐구가 깊어지기 쉽습니다. 고민이 길어질 때는 기록과 휴식으로 균형을 잡으세요.`,
+    정인: `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용해 배움과 보호·지지를 받는 구조가 열리기 쉽습니다. 타인 기준에만 맞추면 속도가 느려질 수 있으니 자기 목표를 함께 적어 두면 좋습니다.`,
+  };
+  return (
+    m[ko] ??
+    `또한 ${stemCompound} 천간은 ${name}님에게 ${h}으로 작용하므로, 이 해의 판단 방식과 역할 수행에서 ${ko}의 색이 뚜렷해질 수 있습니다.`
+  );
+}
+
+function yeonunBranchBalanceLine(el: FiveElement): string {
+  if (el === "화") {
+    return "다만 과한 열정이 직설적 표현으로 이어져 갈등이나 과로를 부를 수 있으니, 균형 잡힌 태도와 휴식 루틴이 필요합니다.";
+  }
+  if (el === "금") {
+    return "다만 지나치게 날을 세우거나 완벽주의만 앞세우면 관계가 경직될 수 있으니, 완충 대화를 남겨 두세요.";
+  }
+  if (el === "수") {
+    return "다만 감정과 생각의 파동이 커질 때는 결정을 잠시 미루고 수면을 챙기면 판단이 안정됩니다.";
+  }
+  if (el === "목") {
+    return "다만 확장 욕구만 앞서면 약속이 늘어나 피로가 쌓일 수 있으니 우선순위를 자주 점검하세요.";
+  }
+  return "다만 욕심을 한꺼번에 잡으려 하면 흐름이 흔들릴 수 있으니, 단계를 나눠 가져가는 편이 좋습니다.";
+}
+
+function yeonunStemSectionBody(
+  name: string,
+  year: number,
+  c: Pick<YeonunColumn, "stem" | "stemHanja" | "stemElement" | "sipseongStem">,
+  dayStemFull: string,
+  dayStemEl: FiveElement,
+): string {
+  const compound = stemBranchElementCompound(c.stem, c.stemElement);
+  const stemLabel = stemElementFullLabel(c.stem, c.stemHanja, c.stemElement);
+  const p1 = `${year}년 연운의 천간은 ${compound}입니다. ${YEONUN_STEM_ELEMENT_LINE[c.stemElement]}`;
+  const p2 = daewoonElementRelationParagraph(name, dayStemEl, c.stemElement, stemLabel, "천간", dayStemFull);
+  const p3 = yeonunStemSipseongBridge(name, compound, c.sipseongStem);
+  return [p1, p2, p3].join("\n\n");
+}
+
+function yeonunBranchSectionBody(
+  name: string,
+  year: number,
+  c: Pick<YeonunColumn, "branch" | "branchHanja" | "branchElement">,
+  dayStemFull: string,
+  dayStemEl: FiveElement,
+): string {
+  const compound = stemBranchElementCompound(c.branch, c.branchElement);
+  const branchLabel = stemElementFullLabel(c.branch, c.branchHanja, c.branchElement);
+  const p1 = `${year}년 연운의 지지는 ${compound}입니다. ${YEONUN_BRANCH_ELEMENT_LINE[c.branchElement]} ${name}님께는 생활 환경과 관계의 분위기로 이 기운이 스며들기 쉽고, 외부 활동이나 사회적 교류가 늘어날 여지가 있습니다.`;
+  const p2 = daewoonElementRelationParagraph(name, dayStemEl, c.branchElement, branchLabel, "지지", dayStemFull);
+  const p3 = yeonunBranchBalanceLine(c.branchElement);
+  return [p1, p2, p3].join("\n\n");
+}
+
+function yeonunSipseongStemExtendedBody(name: string, year: number, ko: string): string {
+  const h = formatSipseongKoHanja(ko);
+  const pairs: Record<string, [string, string]> = {
+    비견: [
+      `${h}은(는) ${name}님에게 동료·친구와의 관계, 그리고 자기 기준의 중복을 뜻합니다. ${year}년에는 나와 비슷한 톤의 사람·일이 잦아져 속도 조절이 화두가 될 수 있습니다.`,
+      `${h}의 기운은 협력과 경쟁이 동시에 올 수 있으니, 역할과 기대치를 문장으로 정리해 두면 오해를 줄이고 에너지를 아낄 수 있습니다.`,
+    ],
+    겁재: [
+      `${h}은(는) 경쟁과 자원 분배가 겹치기 쉬운 십성입니다. ${year}년에는 주변과의 속도 차이나 이해관계가 표면화할 수 있습니다.`,
+      `성급한 승부보다 손익과 책임 범위를 투명히 나누는 습관이 갈등을 줄이고 실속을 챙기는 데 도움이 됩니다.`,
+    ],
+    식신: [
+      `${h}은(는) 역량을 활용해 창출하고 나누는 에너지입니다. ${year}년에는 ${name}님이 재능을 드러내고 인정받는 흐름이 붙기 쉽습니다.`,
+      `여유와 소통을 함께 가져가면 관계에서도 부드러운 인상을 남기기 좋고, 지나친 경쟁 태도만 피하면 만족도가 올라갑니다.`,
+    ],
+    상관: [
+      `${h}은(는) 표현·비판·창의가 강해지기 쉬운 십성입니다. ${year}년에는 말과 태도가 결과에 직접 영향을 줄 수 있습니다.`,
+      `중요한 결정 전에는 하루 숙성 시간을 두고, 상대 입장을 확인하는 질문을 섞으면 불필요한 마찰을 줄일 수 있습니다.`,
+    ],
+    편재: [
+      `${h}은(는) 기회와 변동이 섞인 재물 흐름으로 읽힙니다. ${year}년에는 수입원이나 지출 패턴이 바뀔 여지가 있습니다.`,
+      `현금 흐름을 주간 단위로 점검하고, 검증 없는 확장은 피하면 재정 안정에 유리합니다.`,
+    ],
+    정재: [
+      `${h}은(는) 규칙과 루틴을 통해 쌓이는 재물 기운에 가깝습니다. ${year}년에는 약속·계약·저축 같은 안정형 선택이 만족도를 높일 수 있습니다.`,
+      `서두르기보다 약속을 지키는 태도가 신뢰로 이어지고, 장기적으로 수익 구조를 단단히 합니다.`,
+    ],
+    편관: [
+      `${h}은(는) ${name}님에게 외부의 도전과 경쟁, 스스로를 단련할 기회를 의미합니다. ${year}년에는 책임감을 요구하는 상황이 잦아질 수 있으나, 이를 통해 내적 성장을 이루는 해로 이해할 수 있습니다.`,
+      `${h}은(는) 자제력과 균형 잡힌 결정을 요구합니다. 성급한 실수를 줄이고 계획을 세우며 행동을 되돌아보는 태도가 이후 발전의 초석이 됩니다.`,
+    ],
+    정관: [
+      `${h}은(는) 규칙과 질서, 안정과 책임감을 의미합니다. ${year}년 ${name}님은 주변 환경 속에서 역할을 명확히 하고 신뢰를 쌓는 흐름이 강해질 수 있습니다.`,
+      `${h}은(는) 체계적인 노력 속에서 결과를 만들어가는 과정을 뜻합니다. 지나치게 틀에만 얽매이면 답답함을 느낄 수 있으니 융통성을 갖추는 것이 좋습니다.`,
+    ],
+    편인: [
+      `${h}은(는) 직관과 창의, 깊은 학습 욕구를 나타냅니다. ${year}년에는 기존 틀을 벗어난 시도가 끌릴 수 있습니다.`,
+      `고민과 의심이 길어지면 에너지가 소모되므로, 기록·멘토링·휴식으로 균형을 맞추세요.`,
+    ],
+    정인: [
+      `${h}은(는) 배움과 보호·지지를 받는 구조로 읽힙니다. ${year}년에는 자격·멘토·제도의 도움이 따라붙기 쉽습니다.`,
+      `타인의 기준에만 맞추면 속도가 느려질 수 있으니, 병행해서 자기 목표를 한 줄씩이라도 적어 두면 좋습니다.`,
+    ],
+  };
+  const pr = pairs[ko] ?? [
+    `${h}은(는) ${year}년 연간 천간에서 ${name}님의 일 처리 방식과 자기 표현에 영향을 주기 쉬운 십성입니다.`,
+    `상황에 맞게 속도를 조절하고 피로 신호를 놓치지 않는 편이 좋습니다.`,
+  ];
+  return pr.join("\n\n");
+}
+
+function yeonunSipseongBranchExtendedBody(
+  name: string,
+  year: number,
+  ko: string,
+  branchHanja: string,
+  branch: string,
+): string {
+  const h = formatSipseongKoHanja(ko);
+  const loc = `지지 ${branchHanja}(${branch})`;
+  const pairs: Record<string, [string, string, string]> = {
+    비견: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 내면의 자존감과 반복 생활 패턴에 이 기운이 스며들기 쉽습니다.`,
+      `${year}년에는 나만의 기준을 지키려는 힘이 강해질 수 있으나, 주변과의 비교로 에너지가 새지 않도록 루틴을 먼저 고정하는 편이 좋습니다.`,
+      `협력이 필요한 일에서는 역할을 나누어 적어 두면 관계 마찰을 줄일 수 있습니다.`,
+    ],
+    겁재: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 관계·자원에서 경쟁이나 마찰이 생기기 쉬운 바탕으로 읽힐 수 있습니다.`,
+      `${year}년에는 이해관계가 표면화할 수 있으니 경계는 명확히 하되 대립만 키우지 않도록 합의 타이밍을 의식하세요.`,
+      `손익과 기한을 투명히 하면 신뢰를 지키면서도 부담을 줄일 수 있습니다.`,
+    ],
+    식신: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 일상 속 취미·표현·돌봄이 강조되는 흐름입니다.`,
+      `${year}년에는 사람들과 나누는 활동이 정서를 풍성하게 하고 관계에서 부드러운 인상을 남기기 쉽습니다.`,
+      `과로만 피하면 만족도와 창의가 함께 올라가기 좋습니다.`,
+    ],
+    상관: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 말과 행동이 감정선에 바로 닿기 쉬운 십성입니다.`,
+      `${year}년에는 즉흥적 반응이 오해를 부를 수 있으니, 중요한 대화는 시간을 두고 정리해 전달하는 습관이 도움이 됩니다.`,
+      `피드백은 사실과 감정을 분리해 말하면 관계 손실을 줄일 수 있습니다.`,
+    ],
+    편재: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 지출·투자·외부 기회가 들뜨기 쉬운 패턴입니다.`,
+      `${year}년에는 현금 흐름을 주간 단위로 점검하고, 검증 없는 확장은 피하는 편이 재정 안정에 유리합니다.`,
+      `감정적인 지출만 줄여도 체감이 크게 달라질 수 있습니다.`,
+    ],
+    정재: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 생활 터전과 재정의 기반이 단단해지기를 원하는 흐름입니다.`,
+      `${year}년에는 장기 계약·저축·주거 같은 현실 기반을 다지면 심리적 안정도 함께 따라올 수 있습니다.`,
+      `서두르지 않고 약속을 지키는 태도가 신뢰를 쌓는 지름길입니다.`,
+    ],
+    편관: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 환경 변화와 압박이 몰릴 수 있는 지지 십성입니다.`,
+      `${year}년에는 책임 범위를 조정할 수 있는지 먼저 점검하고, 몸의 신호를 돌보는 것이 과로를 줄이는 데 도움이 됩니다.`,
+      `규칙을 활용해 리스크를 줄이면 실력으로 인정받기 쉽습니다.`,
+    ],
+    정관: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. ${h}은(는) 규칙과 질서, 책임과 신뢰를 의미합니다.`,
+      `${year}년 ${name}님은 주변 환경 속에서 역할을 명확히 하고 신뢰를 쌓아가는 모습이 나타날 수 있습니다. 상태를 관리하며 약속을 지키는 태도가 좋은 평가로 이어지기 쉽습니다.`,
+      `지나치게 틀에만 얽매이면 답답함을 느낄 수 있으니, 필요한 만큼만 융통성을 허용하세요. 이 시기의 ${h}은(는) 한계를 알고 극복하는 과정으로도 읽을 수 있습니다.`,
+    ],
+    편인: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 직관·창의·깊은 학습 욕구가 환경 쪽에서 강조될 수 있습니다.`,
+      `${year}년에는 새로운 관점을 시도하기 좋으나, 의심과 고민이 길어지면 에너지가 소모됩니다.`,
+      `기록과 휴식으로 균형을 맞추면 몰입도가 올라갑니다.`,
+    ],
+    정인: [
+      `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다. 배움과 보호의 기운이 환경에서 강조될 수 있습니다.`,
+      `${year}년에는 스승·제도·자료를 활용하면 성장에 도움이 되고, 정보 과잉만 피하면 몰입도가 높아집니다.`,
+      `혼자 모든 걸 해결하려 하기보다 검증된 루트를 쓰는 편이 효율적입니다.`,
+    ],
+  };
+  const pr = pairs[ko] ?? [
+    `${loc}에서는 ${name}님의 일간에게 ${h}이 작용합니다.`,
+    `${year}년에는 감정선과 반복 생활 패턴에 이 십성의 색이 스며들기 쉽습니다.`,
+    `속도를 조절하고 휴식 루틴을 고정하면 체감이 안정됩니다.`,
+  ];
+  return pr.join("\n\n");
+}
+
+function yeonunSibiunseongExtendedBody(name: string, year: number, u: string): string {
+  const h = formatSibiunseongKoHanja(u);
+  const peak = u === "제왕" || u === "건록";
+  const low = ["병", "사", "쇠", "묘", "절"].includes(u);
+  if (u === "목욕") {
+    return [
+      `${year}년 연운의 십이운성은 ${h}으로 나타납니다. 목욕은 새로운 단계로 나아가기 위한 정화와 준비 과정을 상징하며, ${name}님께서 이전과 다른 변화를 체감하며 다소 민감한 시기를 경험할 여지가 있습니다.`,
+      `목욕 단계는 외부 상황의 영향을 크게 받을 수 있는 시기이기도 합니다. 관계나 환경의 변동성이 삶에 스며들기 쉽고, 정신적·감정적으로도 변화에 대한 민감함이 커질 수 있습니다.`,
+      `목욕의 기운은 새 출발 전 정리와 정화의 의미를 품고 있으므로, ${year}년은 복잡한 상황을 조율하며 다음 단계를 준비하는 시간으로 쓰기 좋습니다.`,
+    ].join("\n\n");
+  }
+  if (peak) {
+    return [
+      `${year}년 연운의 십이운성은 ${h}입니다. 에너지가 크게 올라가기 쉬운 구간으로, 성과와 과로가 동시에 올 수 있습니다.`,
+      `${name}님은 이 해에 성과를 내는 만큼 회복 루틴을 함께 고정하는 편이 컨디션을 지키는 데 도움이 됩니다.`,
+    ].join("\n\n");
+  }
+  if (low) {
+    return [
+      `${year}년 연운의 십이운성은 ${h}입니다. 에너지가 정리·충전 쪽으로 기울기 쉬워, 성급한 추진보다 점검과 계획이 맞을 수 있습니다.`,
+      `${name}님은 무리한 확장보다 체력·수면·식사를 먼저 챙기면 이후 속도를 올리기 좋습니다.`,
+    ].join("\n\n");
+  }
+  return [
+    `${year}년 연운의 십이운성은 ${h}입니다. 흐름이 바뀌는 구간으로, 준비와 실행의 균형을 맞추는 편이 유리합니다.`,
+    `${name}님은 규칙적인 수면과 식사를 지키고 과로를 줄이면 ${u}운의 리듬을 덜 거칠게 탈 수 있습니다.`,
+  ].join("\n\n");
+}
+
+function yeonunYearSummaryBody(
+  name: string,
+  year: number,
+  c: YeonunColumn,
+  stemComp: string,
+  branchComp: string,
+): string {
+  const ss = formatSipseongKoHanja(c.sipseongStem);
+  const sb = formatSipseongKoHanja(c.sipseongBranch);
+  const u = formatSibiunseongKoHanja(c.sibiunseong);
+  return [
+    `${year}년 연운은 ${name}님에게 ${stemComp} 천간과 ${branchComp} 지지가 맞물리는 해로 읽을 수 있습니다. 천간 십성 ${ss}와 지지 십성 ${sb}가 함께 작용하면 외부 역할·감정선·생활 환경에서 그 기운이 동시에 드러날 여지가 있으니, 앞선 각 문단에서 짚은 주제를 한 번에 몰아서 해결하려 하기보다 순서를 정해 나누는 편이 좋습니다.`,
+    `십이운성이 ${u}로 나타나는 점은 리듬과 회복 방식을 어떻게 가져가느냐에 따라 체감 차이가 커질 수 있음을 뜻합니다. 중요한 선택의 순간에는 감정에만 휘둘리지 않도록 기준을 먼저 적어 두고, 실행 순서를 나누면 훨씬 안정적으로 흐름을 활용하기 좋습니다.`,
+  ].join("\n\n");
+}
+
 function buildDerivedPromptFacts(input: LlmGenerateInput): string {
   const ext = computeSajuExtended(input.saju.fourPillarsKorean);
   if (!ext) return "";
 
   const gwinLabel = (items: string[]) => (items.length ? items.join(", ") : "해당없음");
+  const day = ext.pillars[1];
+  const stemYYEl = formatYinyangElementKoHanja(day.stemYinYang, day.stemElement);
+  const branchYYEl = formatYinyangElementKoHanja(day.branchYinYang, day.branchElement);
 
   const lines: string[] = [
     "## 계산된 해석 데이터",
     `- 일주: ${input.saju.fourPillarsKorean.day} (${ext.pillars[1].stemHanja}(${ext.pillars[1].stemKorean})${ext.pillars[1].branchHanja}(${ext.pillars[1].branchKorean}))`,
+    `- 일주 일간(참고 표기): ${day.stemHanja}(${day.stemKorean})은 ${stemYYEl} 성격으로 서술하세요.`,
+    `- 일주 일지(참고 표기): ${day.branchHanja}(${day.branchKorean})은 ${branchYYEl} 성격으로 서술하세요.`,
     `- 오행 분포: 목 ${ext.elementPcts.목}%(${ext.elementCounts.목}개), 화 ${ext.elementPcts.화}%(${ext.elementCounts.화}개), 토 ${ext.elementPcts.토}%(${ext.elementCounts.토}개), 금 ${ext.elementPcts.금}%(${ext.elementCounts.금}개), 수 ${ext.elementPcts.수}%(${ext.elementCounts.수}개)`,
     `- 음양 비율: 양 ${ext.yinYangPct.yang}%, 음 ${ext.yinYangPct.yin}%`,
+    `- 3장(일주 성격) 참고: 일주 ${input.saju.fourPillarsKorean.day} = 일간 ${day.stemHanja}(${day.stemKorean}) ${stemYYEl}, 일지 ${day.branchHanja}(${day.branchKorean}) ${branchYYEl}. 일간 십성=${day.sipseongStem}, 지지 십성=${day.sipseongBranch}.`,
     `- 시주: ${ext.pillars[0].stemKorean}${ext.pillars[0].branchKorean}, 천간 십성=${ext.pillars[0].sipseongStem}, 지지 십성=${ext.pillars[0].sipseongBranch}, 십이운성=${ext.pillars[0].sibiunseong}, 십이신살=${ext.pillars[0].sibisinsal}, 귀인=${gwinLabel(ext.pillars[0].gwin)}`,
     `- 일주: ${ext.pillars[1].stemKorean}${ext.pillars[1].branchKorean}, 천간 십성=${ext.pillars[1].sipseongStem}, 지지 십성=${ext.pillars[1].sipseongBranch}, 십이운성=${ext.pillars[1].sibiunseong}, 십이신살=${ext.pillars[1].sibisinsal}, 귀인=${gwinLabel(ext.pillars[1].gwin)}`,
     `- 월주: ${ext.pillars[2].stemKorean}${ext.pillars[2].branchKorean}, 천간 십성=${ext.pillars[2].sipseongStem}, 지지 십성=${ext.pillars[2].sipseongBranch}, 십이운성=${ext.pillars[2].sibiunseong}, 십이신살=${ext.pillars[2].sibisinsal}, 귀인=${gwinLabel(ext.pillars[2].gwin)}`,
     `- 연주: ${ext.pillars[3].stemKorean}${ext.pillars[3].branchKorean}, 천간 십성=${ext.pillars[3].sipseongStem}, 지지 십성=${ext.pillars[3].sipseongBranch}, 십이운성=${ext.pillars[3].sibiunseong}, 십이신살=${ext.pillars[3].sibisinsal}, 귀인=${gwinLabel(ext.pillars[3].gwin)}`,
+    `- 4장(십성) 서술 순서(필수): 연주(초년)→월주(청년)→일주(중년)→시주(말년). 각 기둥에서 반드시 천간·지지 십성 이름을 아래와 동일하게 쓰세요 — 연간 ${ext.pillars[3].sipseongStem}, 연지 ${ext.pillars[3].sipseongBranch} / 월간 ${ext.pillars[2].sipseongStem}, 월지 ${ext.pillars[2].sipseongBranch} / 일간 ${ext.pillars[1].sipseongStem}, 일지 ${ext.pillars[1].sipseongBranch} / 시간 ${ext.pillars[0].sipseongStem}, 시지 ${ext.pillars[0].sipseongBranch}. (여기서 일간·일지는 일주 기둥의 천간·지지를 뜻합니다.)`,
+    `- 5장(십이운성) 서술 순서(필수): 연주(초년)→월주(청년)→일주(중년)→시주(말년). 각 기둥의 십이운성(일간 대비 그 기둥 지지 기준)은 반드시 아래와 문자 그대로 일치 — 연주 ${ext.pillars[3].sibiunseong}, 월주 ${ext.pillars[2].sibiunseong}, 일주 ${ext.pillars[1].sibiunseong}, 시주 ${ext.pillars[0].sibiunseong}.`,
+    `- 6장(십이신살·귀인): 신살은 연주(초년)→월주(청년)→일주(중년)→시주(말년) 순. 신살 이름은 반드시 표와 동일 — 연주 ${ext.pillars[3].sibisinsal}, 월주 ${ext.pillars[2].sibisinsal}, 일주 ${ext.pillars[1].sibisinsal}, 시주 ${ext.pillars[0].sibisinsal}. 귀인은 기둥별로 연 ${gwinLabel(ext.pillars[3].gwin)}, 월 ${gwinLabel(ext.pillars[2].gwin)}, 일 ${gwinLabel(ext.pillars[1].gwin)}, 시 ${gwinLabel(ext.pillars[0].gwin)} (없으면 해당없음).`,
+    `- 7장(연애·결혼): 일간 ${day.stemHanja}(${day.stemKorean}) ${stemYYEl} 기준으로 성향·연애관을 서술. '살과 귀인의 영향'에서는 초년=연주 신살 ${ext.pillars[3].sibisinsal}·귀인 ${gwinLabel(ext.pillars[3].gwin)}, 청년=월주 ${ext.pillars[2].sibisinsal}·${gwinLabel(ext.pillars[2].gwin)}, 중년=일주 ${ext.pillars[1].sibisinsal}·${gwinLabel(ext.pillars[1].gwin)}, 말년=시주 ${ext.pillars[0].sibisinsal}·${gwinLabel(ext.pillars[0].gwin)} 과 문자 그대로 맞출 것.`,
+    `- 8장(재물운): '시간에 따른 재물운의 흐름'은 반드시 네 구간(초년=연주 ${input.saju.fourPillarsKorean.year}, 월주 ${input.saju.fourPillarsKorean.month}, 일주 ${input.saju.fourPillarsKorean.day}, 시주 ${input.saju.fourPillarsKorean.hour})마다 해당 기둥의 천간·지지 십성·십이운성·십이신살·귀인을 표와 동일한 이름으로 넣을 것. 일간 ${day.stemHanja}(${day.stemKorean}) ${stemYYEl}·일지 ${day.branchHanja}(${day.branchKorean}) ${branchYYEl}를 재물 관점에서 풀 것.`,
+    `- 9장(직업운): 소제목 순서 고정. '나의 일간 성격에 맞는 직업, 직무'는 일간 ${day.stemHanja}(${day.stemKorean}) ${stemYYEl} 기질과 직종 예시를 샘플 밀도로 연결. '나의 직장운'은 월간·월지 십성을 반드시 이름 그대로 언급 — 월간 ${ext.pillars[2].sipseongStem}, 월지 ${ext.pillars[2].sipseongBranch}(월주 ${input.saju.fourPillarsKorean.month}, 십이운성 ${ext.pillars[2].sibiunseong}). '나의 사업운'은 일주 일지 십성 ${ext.pillars[1].sipseongBranch}와 시주 시지 십성 ${ext.pillars[0].sipseongBranch}(필요 시 시간 천간 십성 ${ext.pillars[0].sipseongStem})을 직업·사업 맥락으로 풀 것. '십이신살과 귀인의 영향'은 연·월·일·시 신살(${ext.pillars[3].sibisinsal}, ${ext.pillars[2].sibisinsal}, ${ext.pillars[1].sibisinsal}, ${ext.pillars[0].sibisinsal})·귀인(연 ${gwinLabel(ext.pillars[3].gwin)}, 월 ${gwinLabel(ext.pillars[2].gwin)}, 일 ${gwinLabel(ext.pillars[1].gwin)}, 시 ${gwinLabel(ext.pillars[0].gwin)})을 직장·이직·사업 변동과 연결해 장문으로 쓸 것.`,
+    `- 10장(건강운): 소제목 순서 고정. '나의 건강운'에 음양 비율(양 ${ext.yinYangPct.yang}%, 음 ${ext.yinYangPct.yin}%)과 오행 분포(목·화·토·금·수 %·개수)를 반드시 반영하고, 네 기둥에 나타나는 천간·지지 십성 이름을 건강·스트레스·회복 맥락으로 풀 것(의학 진단 금지, 생활·예방 관점). '시기에 따른 나의 건강운'은 네 문단으로 '초년기 :' '청년기 :' '중년기 :' '말년기 :' 각각 시작하고, 각 문단에 해당 간지(${input.saju.fourPillarsKorean.year}/${input.saju.fourPillarsKorean.month}/${input.saju.fourPillarsKorean.day}/${input.saju.fourPillarsKorean.hour})의 십이운성을 ${ext.pillars[3].sibiunseong}, ${ext.pillars[2].sibiunseong}, ${ext.pillars[1].sibiunseong}, ${ext.pillars[0].sibiunseong}과 한자 병기 형식으로 넣을 것. '십이신살과 귀인의 영향'은 신살·귀인 이름을 표와 동일하게 쓰고 건강에 비유해 풀 것. '주의해야 할 질병'은 소제목 아래 '폐질환 :' 등 항목 라벨을 쓰되 일반적 예방 관점만.`,
+    `- 11장(대운): 일간 오행은 ${day.stemHanja}(${day.stemKorean}) 기준 ${stemYYEl}의 천간 오행(${ext.dayStemElement})으로 고정. 각 대운 칸(나의 N세 대운)마다 첫 본문을 '이번 대운의 천간은 한자(한글), 지지는 한자(한글)입니다.'로 시작한 뒤, 대운 천간·지지 각각을 일간 오행과 상생·상극으로 장문 서술하고, 천간·지지 십성은 한자 병기(식신(食神) 형식), 십이운성은 한자 병기(쇠(衰) 형식), 마지막에 정리 문단. 표의 나이·간지·십성·십이운성은 아래 대운 요약과 문자 그대로 일치.`,
+    `- 12장(연운): 기준 연도는 ${new Date().getFullYear()}년부터 6개 연도(아래 연운 요약과 동일). 도입 후 각 연도마다 '나의 N년 연운' 제목 다음, 소제목 순서 고정 — '나의 N년 연운 : 천간 …' → '나의 N년 연운 : 지지 …' → '나의 N년 연운 : 천간 십성 …' → '나의 N년 연운 : 지지 십성 …' → '나의 N년 연운 : 십이운성 …' → '나의 N년 연운 종합'. 천간 본문은 'N년 연운의 천간은 병화'처럼 한글천간+오행 합성어로 시작하고 오행 이미지·일간과 상생·상극·'또한 … 천간은 … 십성으로 작용'까지 샘플 밀도(천간 블록 최소 3문단). 지지 본문은 'N년 연운의 지지는 오화' 형식으로 환경·관계 분위기와 일간 상생·상극·균형 주의(최소 3문단). 천간 십성 블록은 한자 병기 후 2문단 이상, 지지 십성은 반드시 '지지 한자(한글)에서는 일간에게 십성'으로 시작(다른 지지 이름을 쓰지 말 것) 후 2~3문단. 십이운성은 한자 병기 후 2~3문단(목욕이면 정화·민감·준비 흐름). 종합은 해당 연도 간지·십성·십이운성을 한데 묶은 2문단. 모든 간지·십성·십이운성은 연운 요약과 문자 그대로 일치.`,
   ];
 
   const daewoon = computeDaewoonTable(input.saju.fourPillarsKorean, ext.dayStem, input.gender);
@@ -314,35 +717,251 @@ function buildSectionFormatSpec(input: LlmGenerateInput, sectionNumber: number):
   switch (sectionNumber) {
     case 1:
       return "### 1장 형식 고정\n- 사주가 무엇인지 설명하는 도입 장으로 쓰되, 전체 리포트를 읽는 기준을 잡아주는 역할로 작성하세요.";
-    case 2:
+    case 2: {
+      const extFmt = computeSajuExtended(input.saju.fourPillarsKorean);
+      const yinShown = extFmt ? String(extFmt.yinYangPct.yin) : "…";
+      const yangShown = extFmt ? String(extFmt.yinYangPct.yang) : "…";
+      const ilganRef = extFmt
+        ? `${extFmt.pillars[1].stemHanja}(${extFmt.pillars[1].stemKorean})은 ${formatYinyangElementKoHanja(extFmt.pillars[1].stemYinYang, extFmt.pillars[1].stemElement)}`
+        : "천간한자(천간한글)은 양/음오행(陰陽五行 한자 병기)";
+      const igiRef = extFmt
+        ? `${extFmt.pillars[1].branchHanja}(${extFmt.pillars[1].branchKorean})은 ${formatYinyangElementKoHanja(extFmt.pillars[1].branchYinYang, extFmt.pillars[1].branchElement)}`
+        : "지지한자(지지한글)은 양/음오행(陰陽五行 한자 병기)";
       return `### 2장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안에서는 줄바꿈을 넣지 마세요(한 문장이 PDF에서 중간에 끊기지 않게).
 - 반드시 다음 흐름을 지키세요: 음양 개념 설명 -> 오행 개념 설명 -> 상생/상극 설명 -> '${input.name}님의 음양오행 구성' -> '${input.name}님의 음양에 대한 설명' -> '${input.name}님의 일주에 대한 설명' -> 종합 정리.
-- 계산된 오행 분포, 음양 비율, 일주(${dayPillar})를 반영하세요.`;
-    case 3:
+- 계산된 오행 분포, 음양 비율, 일주(${dayPillar})를 반영하세요.
+- '${input.name}님의 음양오행 구성' 단락은 최소 420자 이상으로 작성하세요.
+- 이 단락에는 반드시 5개 오행(목/화/토/금/수)의 퍼센트와 개수를 모두 포함하세요.
+- 최다 오행(가장 강한 기운) 1개와 최소 오행(가장 약한 기운) 1개를 지정하고, 성향/장단점/보완 방향까지 설명하세요.
+- 오행 간 상생/상극 관계를 최소 1개 이상 실제 데이터와 연결해 설명하세요.
+- 값이 0%인 오행이 있으면 반드시 그 영향과 보완법을 명시하세요.
+- '${input.name}님의 음양에 대한 설명'은 소제목 다음 본문만 최소 360자 이상으로 작성하세요. 반드시 '음(陰) ${yinShown}%, 양(陽) ${yangShown}%'처럼 위 계산 데이터와 동일한 퍼센트를 넣으세요(숫자 임의 변경 금지). 비중이 큰 쪽의 기질(내향·외향, 수용·발산 등)을 풀고, 상대적으로 낮은 쪽에서 생길 수 있는 부족함과 보완 방향을 포함하세요.
+- '${input.name}님의 일주에 대한 설명'은 소제목 다음 본문만 최소 420자 이상으로 작성하세요. 일간은 '${ilganRef}' 형식을 반드시 포함하고, 일지는 '${igiRef}' 형식을 반드시 포함한 뒤 ${dayPillar} 일주 조합의 기질을 생활과 연결해 서술하세요. 오행 분포에서 약하거나 0개인 행이 있으면 이 단락 안에서 보완 필요성까지 연결하세요.
+- 마지막 종합 문단은 소제목 없이 최소 280자 이상으로, 음양 편중·강한 오행·부족한 오행을 한데 묶어 균형을 잡는 생활 제안으로 마무리하세요.`;
+    }
+    case 3: {
+      const ext3 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const d3 = ext3?.pillars[1];
+      const pillarPair = d3 ? `${dayPillar}(${d3.stemHanja}${d3.branchHanja})` : dayPillar;
+      const stemRef = d3
+        ? `${d3.stemHanja}(${d3.stemKorean})·${formatYinyangElementKoHanja(d3.stemYinYang, d3.stemElement)}`
+        : "천간한자(한글)·음양오행(陰陽五行)";
+      const branchRef = d3
+        ? `${d3.branchHanja}(${d3.branchKorean})·${formatYinyangElementKoHanja(d3.branchYinYang, d3.branchElement)}`
+        : "지지한자(한글)·음양오행(陰陽五行)";
       return `### 3장 형식 고정
-- 첫 문장은 반드시 '${dayPillar} 일주에 대한 성격을 분석해드리겠습니다.'로 시작하세요.
-- 반드시 다음 순서를 지키세요: '일간을 기준으로 한 성격 분석' -> 일간 5항목(각 항목은 제목 1줄 + '특징 :' + '영향 :'로 구성) -> '일지를 기준으로 한 성격 분석' -> 일지 5항목(각 항목은 제목 1줄 + '특징 :' + '영향 :'로 구성) -> '일간과 일지를 기준으로 한 종합적인 성격분석'.
-- 각 항목(예: 강한 결단력)은 반드시 하나의 독립 문단으로 작성하고, 항목과 항목 사이에는 빈 줄을 넣으세요.
-- 슬래시로 압축하지 말고, 제목 줄 다음에 '특징 :'과 '영향 :'을 각각 줄바꿈해서 쓰세요.
-- 일간은 ${dayStem}, 일지는 ${dayBranch}의 속성을 반영하세요.`;
-    case 4:
-      return "### 4장 형식 고정\n- 연주 -> 월주 -> 일주 -> 시주 -> 종합 순서를 지키세요.\n- 각 기둥에서 천간 십성과 지지 십성을 모두 설명하세요.";
-    case 5:
-      return "### 5장 형식 고정\n- 연주 -> 월주 -> 일주 -> 시주 -> 종합 순서를 지키세요.\n- 각 기둥의 십이운성을 중심으로 의미, 시기, 주의점, 성장 포인트를 설명하세요.";
-    case 6:
-      return "### 6장 형식 고정\n- '십이신살에 대해 먼저 풀이해보겠습니다!'를 포함하세요.\n- 연주 -> 월주 -> 일주 -> 시주 순으로 신살을 설명한 뒤, '이제 귀인에 대해서 알아볼까요?'로 귀인 파트를 이어서 작성하세요.\n- 마지막은 종합 정리로 마무리하세요.";
-    case 7:
-      return "### 7장 형식 고정\n- 반드시 다음 소제목 순서를 지키세요: 연애운 풀이 -> 일간 성격과 연애 성향 -> 연애에서 나타나는 장단점 -> 연애 시기와 방법 -> 살과 귀인의 영향 -> 성공적인 연애를 위한 조언 -> 나의 결혼운 -> 이상적인 배우자상과 피해야할 배우자상 -> 배우자와의 관계 전망 -> 연애에서 피해야 할 점 -> 종합분석.\n- 각 소제목 본문은 최소 180자(권장 240~420자), 2~4문장으로 작성하세요. 한 줄 설명으로 끝내지 마세요.";
-    case 8:
-      return "### 8장 형식 고정\n- 반드시 다음 소제목 순서를 지키세요: 재물운 풀이 -> 일간 성격과 재물운 -> 시간에 따른 재물운의 흐름 -> 재물운이 크게 들어오는 시기 -> 살과 귀인의 영향 -> 주의해야 될 시기 -> 어떻게 재물을 모으게 될까? -> 성공적인 재물의 축적 방법 -> 종합분석.\n- 각 소제목 본문은 최소 180자(권장 240~420자), 2~4문장으로 작성하세요. 숫자/시기/실행 조언을 함께 넣어주세요.";
-    case 9:
-      return "### 9장 형식 고정\n- 반드시 다음 소제목 순서를 지키세요: 직업운 풀이 -> 나의 일간 성격에 맞는 직업, 직무 -> 나의 직장운 -> 나의 사업운 -> 십이신살과 귀인의 영향 -> 성공적인 직장생활을 위한 조언 -> 종합분석.\n- 각 소제목 본문은 최소 180자(권장 240~420자), 2~4문장으로 작성하세요. 실제 업무 장면 예시를 최소 1개 포함하세요.";
-    case 10:
-      return "### 10장 형식 고정\n- 반드시 다음 소제목 순서를 지키세요: 건강운 풀이 -> 나의 건강운 -> 십이신살과 귀인의 영향 -> 시기에 따른 나의 건강운 -> 주의해야 할 질병 -> 추천 운동 -> 추천 식단 -> 종합분석.\n- 각 소제목 본문은 최소 180자(권장 240~420자), 2~4문장으로 작성하세요. 주의 포인트와 실행 루틴을 함께 제시하세요.";
-    case 11:
-      return "### 11장 형식 고정\n- 먼저 대운 전체 흐름 도입 문단 1개를 쓰세요.\n- 그 뒤 10개 대운 칸을 각각 설명하세요.\n- 각 칸은 반드시 다음 순서를 지키세요: '이번 대운의 천간은 ...' -> '이번 대운의 지지는 ...' -> '천간의 십성은 ...' -> '지지의 십성은 ...' -> '십이운성은 ...' -> 정리 문단.";
-    case 12:
-      return "### 12장 형식 고정\n- 먼저 연운 전체 흐름 도입 문단 1개를 쓰세요.\n- 그 뒤 최근 6개 연도를 각각 설명하세요.\n- 각 연도는 반드시 다음 순서를 지키세요: '나의 20XX년 연운' -> '나의 20XX년 연운 : 천간 ...' -> '나의 20XX년 연운 : 지지 ...' -> '나의 20XX년 연운 : 천간 십성 ...' -> '나의 20XX년 연운 : 지지 십성 ...' -> '나의 20XX년 연운 : 십이운성 ...' -> '나의 20XX년 연운 종합'.";
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안(특히 '특징 :' '영향 :' 본문)에서는 줄바꿈을 넣지 마세요.
+- 첫 문장에 반드시 "${input.name}님"과 "${dayPillar} 일주"를 넣고, '~성격을 분석해드리겠습니다'로 이어가세요.
+- 반드시 다음 순서를 지키세요: '일간을 기준으로 한 성격 분석' -> 일간 도입 문단(최소 180자) -> 일간 5항목 -> '일지를 기준으로 한 성격 분석' -> 일지 도입 문단(최소 180자) -> 일지 5항목 -> '일간과 일지를 기준으로 한 종합적인 성격분석'.
+- 일간 도입 문단: ${pillarPair} 일주의 천간을 중심으로 ${stemRef}의 상징·기질을 경자(庚子) 일주 해설 샘플처럼 구체적으로 풀되, 간지·오행·한자 표기는 반드시 본인 데이터와 일치시키세요.
+- 일지 도입 문단: 지지 ${branchRef}를 중심으로 일지 기질을 같은 밀도로 풀고, ${dayPillar} 일지에 해당함을 명시하세요.
+- 일간 5항목·일지 5항목: 항목 제목 1줄 다음 빈 줄, 그다음 '특징 :' 한 줄에 본문(최소 85자), 빈 줄, '영향 :' 한 줄에 본문(최소 85자). 항목과 항목 사이는 빈 줄로 구분.
+- 종합 문단: 최소 2문단(문단당 최소 180자), 일간·일지 결합 해석 + 대인관계/감정 표현/속도 조절 등 실행 조언으로 마무리.
+- 일간은 ${dayStem}, 일지는 ${dayBranch}의 속성을 반영하고, 십성(일간·일지)은 계산 데이터와 맞출 것.`;
+    }
+    case 4: {
+      const ext4 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const y = ext4?.pillars[3];
+      const m = ext4?.pillars[2];
+      const d4 = ext4?.pillars[1];
+      const h = ext4?.pillars[0];
+      const dataHint = y && m && d4 && h
+        ? `연주 ${input.saju.fourPillarsKorean.year}(${y.stemHanja}${y.branchHanja}), 월주 ${input.saju.fourPillarsKorean.month}(${m.stemHanja}${m.branchHanja}), 일주 ${dayPillar}(${d4.stemHanja}${d4.branchHanja}), 시주 ${input.saju.fourPillarsKorean.hour}(${h.stemHanja}${h.branchHanja})`
+        : `연월일시 네 기둥(${input.saju.fourPillarsKorean.year} ${input.saju.fourPillarsKorean.month} ${dayPillar} ${input.saju.fourPillarsKorean.hour})`;
+      return `### 4장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안에서는 줄바꿈을 넣지 마세요(한 글자가 PDF에서 잘리지 않게).
+- 반드시 순서: 연주(초년기) → 월주(청년기) → 일주(중년기) → 시주(말년기) → 종합.
+- 각 기둥 블록 구조(이 순서·밀도를 지키세요):
+  1) 전환 문장 1문장(먼저/다음으로/마지막으로 등) + 해당 기둥이 의미하는 인생 시기를 1문장으로 설명.
+  2) 한 문단으로 "○간에는 (천간 십성명)이, ○지에는 (지지 십성명)이 위치하고 있습니다." — ○는 연/월/일/시에 맞게. 십성 이름은 계산 데이터와 문자 그대로 일치.
+  3) 천간 십성 해설 문단 1개: 그 십성의 상징·역할을 풀고, 해당 시기(초년·청년·중년·말년) 생활·성향·관계에 어떻게 녹아드는지 서술. 최소 220자.
+  4) 지지 십성 해설 문단 1개: 지지 십성의 의미를 풀고 같은 시기 맥락에서 구체적으로 이어가며, 과할 때의 주의나 균형 포인트를 포함. 최소 220자.
+- 종합은 소제목 "종합적으로," 또는 "종합적으로 보면"으로 시작하는 2문단: 1문단은 네 시기 흐름을 묶어 요약(최소 260자), 2문단은 ${input.name}님에게 맞는 균형·조절 관점으로 마무리(최소 200자).
+- 좋은 십성/나쁜 십성 이분법으로 끊지 말고, 역할과 타이밍으로 읽으세요.
+- ${dataHint}의 간지·십성은 반드시 본인 데이터와 일치시키고, 아래 샘플은 문장 길이와 전개만 참고하세요.`;
+    }
+    case 5: {
+      const ext5 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const y5 = ext5?.pillars[3];
+      const m5 = ext5?.pillars[2];
+      const d5 = ext5?.pillars[1];
+      const h5 = ext5?.pillars[0];
+      const dataHint5 =
+        y5 && m5 && d5 && h5
+          ? `연주 ${input.saju.fourPillarsKorean.year} 십이운성=${y5.sibiunseong}, 월주 ${input.saju.fourPillarsKorean.month}=${m5.sibiunseong}, 일주 ${dayPillar}=${d5.sibiunseong}, 시주 ${input.saju.fourPillarsKorean.hour}=${h5.sibiunseong}`
+          : `연월일시 네 기둥의 십이운성(표와 동일)`;
+      return `### 5장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안에서는 줄바꿈을 넣지 마세요. '십이운성' 등 고유명사는 반드시 한 줄 안에 붙여 쓰세요.
+- 맨 앞에 전체 도입 1~2문단: 십이운성이 시기별 리듬을 어떻게 보여 주는지, 하나씩 보겠다는 안내(샘플처럼 자연스러운 문장). 도입만 합쳐 최소 120자.
+- 본문 순서(필수): 연주(초년기) → 월주(청년기) → 일주(중년기) → 시주(말년기) → 종합.
+- 각 기둥 블록마다:
+  1) 전환 문장(먼저/다음으로/마지막으로) + 해당 기둥이 의미하는 시기를 한 문장으로.
+  2) 한 문단으로 '○주에는 (십이운성 한글명)(한자 병기)이 위치하고 있습니다.' 형식 — ○는 연/월/일/시. 운성 이름은 ${dataHint5}와 반드시 일치, 한자는 예: 제왕(帝旺)·병(病)·사(死)·묘(墓)처럼 병기.
+  3) 그 운성을 풀어 쓰는 해설 문단 1개: 상징·에너지 강약·그 시기 생활·관계·주의·성장으로 이어지며 최소 240자. 강한 운성이면 성취·리더십 등, 약하거나 전환 운성이면 시행착오·내적 성장·재정비 등으로 균형 있게 서술.
+- 종합: '종합적으로,'로 시작하는 긴 문단 1개(네 시기 흐름을 묶어 최소 280자) + ${input.name}님께 리듬표처럼 읽으라는 조언으로 마무리하는 문단 1개(최소 160자).
+- 결과의 좋음/나쁨으로 단정하지 말고, 에너지가 오르는 구간과 쉬어야 할 구간을 읽는 관점을 유지하세요.`;
+    }
+    case 6: {
+      const ext6 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const g6 = (items: string[]) => (items.length ? items.join(", ") : "해당없음");
+      const y6 = ext6?.pillars[3];
+      const m6 = ext6?.pillars[2];
+      const d6 = ext6?.pillars[1];
+      const h6 = ext6?.pillars[0];
+      const salHint =
+        y6 && m6 && d6 && h6
+          ? `연 ${y6.sibisinsal}, 월 ${m6.sibisinsal}, 일 ${d6.sibisinsal}, 시 ${h6.sibisinsal}`
+          : "표의 십이신살 행과 동일";
+      const gwinHint =
+        y6 && m6 && d6 && h6
+          ? `연 ${g6(y6.gwin)}, 월 ${g6(m6.gwin)}, 일 ${g6(d6.gwin)}, 시 ${g6(h6.gwin)}`
+          : "표의 귀인 행과 동일";
+      return `### 6장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '십이신살' '귀인' 등 고유명사는 띄어쓰기 포함 한 덩어리로 쓰세요.
+- 맨 앞 도입 2문단(합쳐 최소 120자): 십이신살과 귀인의 조합이 삶에 어떤 식으로 스며드는지, 요소를 하나씩 풀겠다는 안내(샘플처럼 부드러운 화법).
+- 다음 줄에 반드시 포함: 십이신살에 대해 먼저 풀이해보겠습니다!
+- 신살 본문 순서(필수): 연주(초년기) → 월주(청년기) → 일주(중년기) → 시주(말년기).
+- 각 기둥마다: (1) 전환+해당 시기·기둥의 의미를 짧게 한 문단 (2) '○주에는 (신살 이름)이 위치하고 있습니다.' 한 문단 — 신살 이름은 ${salHint}와 문자 그대로 일치 (3) 그 신살의 상징·생활·관계·주의를 풀어 쓰는 해설 문단 1개, 최소 240자.
+- 그다음 반드시 포함: 이제 귀인에 대해서 알아볼까요?
+- 귀인: ${gwinHint}. 귀인이 있는 기둥만 '○주를 풀이해드리겠습니다' 전환 + '○주에는 (귀인명)이 위치하고 있습니다' + 귀인 해설 장문(최소 220자). 해당없음인 기둥은 장문 풀이를 생략해도 되나, 필요하면 한 문장으로만 언급.
+- 귀인 일반 설명 문단 1개: 도움·숨통·보조 지표 관점(샘플 밀도).
+- 마지막 '종합적으로,'로 시작하는 장문 1개(네 시기와 신살·귀인을 묶어 최소 280자) + 긍정적 활용·지혜로운 선택 등으로 마무리.
+- 신살을 사건 절대화하지 말고, 인연·이동·갈등·내면 등 흐름으로 읽으세요.`;
+    }
+    case 7: {
+      const ext7 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const d7 = ext7?.pillars[1];
+      const stemLine = d7
+        ? `일간 ${d7.stemHanja}(${d7.stemKorean}) ${formatYinyangElementKoHanja(d7.stemYinYang, d7.stemElement)}`
+        : `일간(${dayPillar[0] ?? "?"}) 음양오행(陰陽五行)`;
+      return `### 7장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '연애운' '결혼운' 등은 한 덩어리로 쓰세요.
+- 소제목 순서(필수): 연애운 풀이 → 일간 성격과 연애 성향 → 연애에서 나타나는 장단점 → 연애 시기와 방법 → 살과 귀인의 영향 → 성공적인 연애를 위한 조언 → 나의 결혼운 → 이상적인 배우자상과 피해야할 배우자상 → 배우자와의 관계 전망 → 연애에서 피해야 할 점 → 종합분석.
+- 각 소제목은 제목 한 줄 다음 빈 줄, 그다음 본문만(제목 반복 금지).
+- 연애운 풀이: ${input.name}님 중심으로 연애 흐름의 핵심을 최소 200자.
+- 일간 성격과 연애 성향: 반드시 ${stemLine}을(를) 문장 안에 넣고, 겉모습·내면·사랑에서의 기준·헌신 등을 샘플 밀도로 최소 260자.
+- 연애에서 나타나는 장단점: 본문에 '장점:' '단점:'으로 나누어 각각 최소 140자 이상.
+- 연애 시기와 방법: 반드시 '언제:' '어디서:' '누구와:' '어떻게:' 네 줄(또는 네 문단)으로 나누고 항목마다 최소 90자.
+- 살과 귀인의 영향: 초년·청년·중년·말년 네 구간을 모두 쓰고, 각 구간에 연·월·일·시 기둥의 실제 십이신살·귀인(계산 데이터)을 이름 그대로 넣어 연애 맥락으로 풀어 최소 320자(한 문단 또는 네 짧은 문단).
+- 성공적인 연애를 위한 조언: 실행 문장 중심 최소 180자.
+- 나의 결혼운: 시기감·결혼생활의 안정·역할 최소 200자.
+- 이상적인 배우자상과 피해야할 배우자상: '이상적인 배우자상:' '피해야할 배우자상:'으로 나누어 각 최소 160자.
+- 배우자와의 관계 전망: 신뢰·책임·감정 표현 주의 등 최소 200자.
+- 연애에서 피해야 할 점: 최소 180자.
+- 종합분석: ${input.name}님의 연애·결혼을 한데 묶어 최소 260자.`;
+    }
+    case 8: {
+      const ext8 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const y8 = ext8?.pillars[3];
+      const m8 = ext8?.pillars[2];
+      const d8 = ext8?.pillars[1];
+      const h8 = ext8?.pillars[0];
+      const flowHint =
+        y8 && m8 && d8 && h8
+          ? `초년기 ${input.saju.fourPillarsKorean.year}(${y8.stemHanja}${y8.branchHanja}) 천간십성 ${y8.sipseongStem}·지지십성 ${y8.sipseongBranch}·십이운성 ${y8.sibiunseong}·신살 ${y8.sibisinsal} / 청년기 ${input.saju.fourPillarsKorean.month}(${m8.stemHanja}${m8.branchHanja}) ${m8.sipseongStem}·${m8.sipseongBranch}·${m8.sibiunseong}·${m8.sibisinsal} / 중년기 ${dayPillar}(${d8.stemHanja}${d8.branchHanja}) ${d8.sipseongStem}·${d8.sipseongBranch}·${d8.sibiunseong}·${d8.sibisinsal} / 말년기 ${input.saju.fourPillarsKorean.hour}(${h8.stemHanja}${h8.branchHanja}) ${h8.sipseongStem}·${h8.sipseongBranch}·${h8.sibiunseong}·${h8.sibisinsal}`
+          : "연월일시 네 기둥의 간지·십성·십이운성·신살(표와 동일)";
+      return `### 8장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '재물운' '십이신살' 등 고유명사는 한 덩어리로 쓰세요.
+- 소제목 순서(필수): 재물운 풀이 → 일간 성격과 재물운 → 시간에 따른 재물운의 흐름 → 재물운이 크게 들어오는 시기 → 살과 귀인의 영향 → 주의해야 될 시기 → 어떻게 재물을 모으게 될까? → 성공적인 재물의 축적 방법 → 종합분석.
+- 재물운 풀이: ${input.name}님 중심, 관리 습관·구조·속도 조절 관점, 최소 200자.
+- 일간 성격과 재물운: '나의 일간은 ${d8 ? `${d8.stemKorean}으로` : "일간으로"}'처럼 일간 오행 기질을 먼저 밝히고(한자·한글·음양오행 병기 권장), 재물 축적·판단·실행과 연결해 샘플 밀도로 최소 280자.
+- 시간에 따른 재물운의 흐름: 네 문단으로 '초년기 :' '청년기 :' '중년기 :' '말년기 :' 각각 시작. 각 문단에 해당 간지·천간·지지 십성·십이운성을 반드시 넣고 신살·귀인을 재물 맥락으로 풀며 최소 220자. 데이터: ${flowHint}
+- 재물운이 크게 들어오는 시기: 중년·말년 등 시기 지정과 이유를 구체적으로 최소 200자.
+- 살과 귀인의 영향: 네 기둥에서 나타나는 십이신살·귀인을 재물(기회·변동·조언) 관점으로 묶어 최소 260자. 이름은 계산값과 일치.
+- 주의해야 될 시기: 청년·중년 등 구체 시기와 소비·확장·경쟁 등 최소 200자.
+- 어떻게 재물을 모으게 될까?: 일간 기질과 맞는 축적 방식, 귀인 활용, 최소 200자.
+- 성공적인 재물의 축적 방법: 목표·균형·귀인·리스크, 최소 200자.
+- 종합분석: ${input.name}님 사주의 재물 구조를 한 문단으로 최소 280자.`;
+    }
+    case 9: {
+      const ext9 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const m9 = ext9?.pillars[2];
+      const d9 = ext9?.pillars[1];
+      const h9 = ext9?.pillars[0];
+      const jobStemLine = d9
+        ? `일간 ${d9.stemHanja}(${d9.stemKorean}) ${formatYinyangElementKoHanja(d9.stemYinYang, d9.stemElement)}`
+        : `일간(${dayPillar[0] ?? "?"}) 음양오행(陰陽五行)`;
+      const monthJobHint =
+        m9 && h9 && d9
+          ? `직장(월주 ${input.saju.fourPillarsKorean.month}): 월간 ${m9.sipseongStem}·월지 ${m9.sipseongBranch}·운성 ${m9.sibiunseong}. 사업(일·시): 일지 ${d9.sipseongBranch}, 시지 ${h9.sipseongBranch}(시간 천간 십성 ${h9.sipseongStem}).`
+          : "월간·월지·일지·시지 십성은 표와 동일한 이름으로 인용";
+      return `### 9장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '직업운' '직장운' '사업운' '십이신살' 등 고유명사는 한 덩어리로 쓰세요.
+- 소제목 순서(필수): 직업운 풀이 → 나의 일간 성격에 맞는 직업, 직무 → 나의 직장운 → 나의 사업운 → 십이신살과 귀인의 영향 → 성공적인 직장생활을 위한 조언 → 종합분석.
+- 직업운 풀이: ${input.name}님 중심으로 역할·구조·지속 가능성 관점, 최소 200자. ${dayPillar} 일주를 축으로 네 기둥과 연결해 한 문단으로.
+- 나의 일간 성격에 맞는 직업, 직무: 반드시 '${jobStemLine}'으로 시작하거나 본문 초반에 포함. 일간 오행 기질(금속·성취·규범 등 은유)과 맞는 직종군을 2~3개 이상 구체적으로 들고, 논리·분석·체계와 연결해 샘플 밀도로 최소 360자.
+- 나의 직장운: 월간·월지가 청년·직장 흐름임을 밝히고, 월지 십성·월간 십성을 작은따옴표로 인용하듯 이름 그대로 넣어 장문으로 풀 것. 경쟁·협력·보고 체계 등 실무 맥락 포함, 최소 320자. 데이터: ${monthJobHint}
+- 나의 사업운: 사업은 일지·시지에서 읽는다는 전제로 일지 십성·시지 십성을 이름 그대로 넣고 독립·동업·전략·리스크를 풀어 최소 300자.
+- 십이신살과 귀인의 영향: 네 기둥에서 드러나는 십이신살을 직업 변화·이동·대인관계로 풀고, 귀인은 학문·위기 조력 등 직무 맥락으로 장문(최소 380자). 신살·귀인 이름은 계산값과 일치.
+- 성공적인 직장생활을 위한 조언: 일간 기질의 과단점(완고·완벽주의 등)과 월간 십성이 주는 경쟁·갈등 완화, 시지 십성의 안정 에너지 활용을 연결해 실행 문장 중심 최소 280자.
+- 종합분석: ${input.name}님 사주의 직장·사업·신살·귀인을 한 문단으로 묶어 최소 300자.`;
+    }
+    case 10: {
+      const ext10 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const y10 = ext10?.pillars[3];
+      const m10 = ext10?.pillars[2];
+      const d10 = ext10?.pillars[1];
+      const h10 = ext10?.pillars[0];
+      const flowHealth =
+        y10 && m10 && d10 && h10
+          ? `초년기 ${input.saju.fourPillarsKorean.year} 십이운성 ${y10.sibiunseong} / 청년기 ${input.saju.fourPillarsKorean.month} ${m10.sibiunseong} / 중년기 ${dayPillar} ${d10.sibiunseong} / 말년기 ${input.saju.fourPillarsKorean.hour} ${h10.sibiunseong}`
+          : "연월일시 각 기둥 십이운성(표와 동일)";
+      const yy10 = ext10
+        ? `음 ${ext10.yinYangPct.yin}%·양 ${ext10.yinYangPct.yang}%, 오행 목${ext10.elementPcts.목}%·화${ext10.elementPcts.화}%·토${ext10.elementPcts.토}%·금${ext10.elementPcts.금}%·수${ext10.elementPcts.수}%`
+        : "계산된 음양·오행";
+      return `### 10장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '건강운' '스트레스' '추천 운동' 등 고유명사는 한 덩어리로 쓰세요.
+- 소제목 순서(필수): 건강운 풀이 → 나의 건강운 → 십이신살과 귀인의 영향 → 시기에 따른 나의 건강운 → 주의해야 할 질병 → 추천 운동 → 추천 식단 → 종합분석.
+- 의학적 진단·단정은 금지. 생활 리듬·예방·스트레스 관리 관점으로만 서술하세요.
+- 건강운 풀이: ${input.name}님 중심으로 피로 누적·회복 리듬·루틴 안정성, 최소 200자.
+- 나의 건강운: 반드시 ${yy10}을 본문에 포함하고, 네 기둥에 드러나는 십성 흐름(상관·겁재·정관·정인 등 실제 이름)을 감정·스트레스·체력과 연결해 샘플 밀도로 최소 380자. 일간 ${d10 ? `${d10.stemHanja}(${d10.stemKorean})` : "일간"} 기준으로 읽되 장기를 특정 진단하지 말 것.
+- 십이신살과 귀인의 영향: 네 기둥 신살·귀인을 이름 그대로 넣어 변동·관계 스트레스·회복 통로로 장문(최소 340자).
+- 시기에 따른 나의 건강운: 네 문단 '초년기 :'~'말년기 :', 각 문단에 해당 간지·${formatSibiunseongKoHanja(y10?.sibiunseong ?? "제왕")} 같은 십이운성(한자 병기)과 체력·과로·회복 포인트, 최소 200자/문단. 데이터: ${flowHealth}
+- 주의해야 할 질병: '폐질환 :' '신경계 질환 :' '소화기 계통 :'처럼 라벨을 쓰고 항목마다 최소 120자, 예방·생활 습관만.
+- 추천 운동·추천 식단: 오행 균형에 맞춘 구체 예시(유산소·요가·따뜻한 식재료 등) 각 최소 200자.
+- 종합분석: ${input.name}님 건강운을 한 문단으로 최소 280자.`;
+    }
+    case 11: {
+      const ext11 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const dayStemLabel = ext11
+        ? `${ext11.pillars[1].stemHanja}(${ext11.pillars[1].stemKorean})`
+        : `일간한자(일간)`;
+      const dayElKo = ext11?.dayStemElement ?? "일간오행";
+      return `### 11장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '대운' '십이운성' '상생' 등은 한 덩어리로 쓰세요.
+- 먼저 대운 전체(10년 단위 흐름)를 아우르는 도입 문단 1개(최소 240자).
+- 이어서 10개 블록. 각 블록은 제목 한 줄 '나의 N세 대운' 다음 빈 줄, 그다음 본문.
+- 각 블록 본문 순서(필수):
+  1) 첫 문장: '이번 대운의 천간은 한자(한글), 지지는 한자(한글)입니다.' (천간·지지를 한 문장에 묶어도 됨).
+  2) 천간 오행을 ${dayStemLabel} 일간의 ${dayElKo} 오행과 상생·상극 관점에서 풀 장문(최소 220자). 임수(壬水)·경금(庚金)처럼 천간+오행+한자 병기. 학업·자기계발·역량 발휘 등 연결.
+  3) 지지 오행을 일간과 상생·상극으로 풀 장문(최소 220자). 술토(戌土)·양토(陽土)처럼 지지·토성·음양 병기. 재물·환경·기반 등 연결.
+  4) '천간의 십성은 식신(食神)입니다.' 형식(한자 병기) 후 십성 성격·생활 연결 장문(최소 200자).
+  5) '지지의 십성은 편인(偏印)입니다.' 형식 후 장문(최소 200자).
+  6) '십이운성은 쇠(衰)입니다.' 형식(한자 병기) 후 리듬·과로·준비·건강 주의 장문(최소 200자).
+  7) '정리보면'으로 시작하는 종합 문단(최소 220자). 재물·학업·관계·균형을 한데 묶을 것.
+- 각 칸의 간지·십성·십이운성은 반드시 '계산된 해석 데이터' 대운 요약과 동일한 문자.`;
+    }
+    case 12: {
+      const ext12 = computeSajuExtended(input.saju.fourPillarsKorean);
+      const dayStemLabel12 = ext12
+        ? `${ext12.pillars[1].stemHanja}(${ext12.pillars[1].stemKorean})`
+        : "일간한자(일간)";
+      const dayElKo12 = ext12?.dayStemElement ?? "일간오행";
+      const y0 = new Date().getFullYear();
+      return `### 12장 형식 고정
+- 문단 사이는 빈 줄(\\n\\n)로만 구분하세요. 문단 안 줄바꿈 금지. '연운' '십이운성' 등은 한 덩어리로 쓰세요.
+- 먼저 연운 전체(최근 6개 연도 흐름)를 아우르는 도입 문단 1개(최소 220자). 기준 시작 연도는 ${y0}년임을 짚어 주세요.
+- 이어서 6개 연도 블록. 각 블록은 제목 한 줄 '나의 N년 연운' 다음 빈 줄, 그다음 소제목·본문.
+- 각 연도 본문 순서(필수):
+  1) '나의 N년 연운 : 천간 한자(한글)' 다음 본문: 'N년 연운의 천간은 (한글천간+오행 합성어)입니다.'로 시작 → 오행 이미지 한 문장 → ${dayStemLabel12} 일간의 ${dayElKo12} 오행과 상생·상극 장문(최소 200자) → '또한 (합성어) 천간은 … 십성으로 작용' 형식으로 연간 천간 십성(${dayStemLabel12} 기준)과 연결한 문단(최소 180자).
+  2) '나의 N년 연운 : 지지 한자(한글)' 다음 본문: 'N년 연운의 지지는 (합성어)입니다.'로 시작 → 환경·관계·활동 분위기 장문 → 일간과 상생·상극 장문 → 균형·주의 한 문단(최소 3문단 합산 520자 이상).
+  3) '나의 N년 연운 : 천간 십성 이름' 다음 본문: 십성 한자 병기(편관(偏官) 형식) 후 2문단 이상(각 최소 180자).
+  4) '나의 N년 연운 : 지지 십성 이름' 다음 본문: 반드시 '지지 한자(한글)에서는 일간에게 십성한자(한글)이 작용합니다'로 시작(표의 그 해 지지·십성과 동일 문자). 이어 2~3문단(각 최소 160자).
+  5) '나의 N년 연운 : 십이운성 이름' 다음 본문: 십이운성 한자 병기(목욕(沐浴) 형식) 후 2~3문단, 리듬·민감도·준비·회복(최소 480자 합산).
+  6) '나의 N년 연운 종합' 다음 본문: 해당 연도 천간·지지·십성·십이운성을 묶어 2문단(각 최소 200자).
+- 각 연도의 간지·십성·십이운성은 반드시 '계산된 해석 데이터' 연운 요약과 동일한 문자.`;
+    }
     default:
       return "";
   }
@@ -355,6 +974,8 @@ function buildSectionReferenceText(input: LlmGenerateInput, sectionNumber: numbe
         "## 2장 기준 원고/스타일",
         "- 아래 설명의 문장 결, 설명 밀도, 전개 순서를 기준으로 삼으세요.",
         "- 개념 설명은 아래처럼 충분히 길고 자연스럽게 쓰고, 그 다음에 개인 오행/음양/일주 해설로 넘어가세요.",
+        "- 개인 파트는 반드시 '계산된 해석 데이터' 숫자·일간·일지 표기와 일치시키고, 음양 설명은 비율의 의미·기질·반대 기운 부족 시 주의를 풀어 쓰세요.",
+        "- 일주 설명은 천간·지지를 각각 한자(한글)+음양오행(陰陽五行)까지 풀고, 마지막 종합에서 강한 오행·부족한 오행·음양 편중을 한 문단으로 묶어 생활 균형 제안으로 끝내세요.",
         "",
         "먼저, 음양은 모든 존재와 현상이 두 가지 상반된 성질을 지닌다는 원리를 의미하는데요, 음은 어두움, 추움, 고요함, 내부 지향성, 수축, 여성적 이미지를 상징하며, 양은 밝음, 따뜻함, 움직임, 외부 지향성, 확장, 남성적 이미지를 상징합니다. 음양은 서로 대립하는 것처럼 보이지만 실상은 상호 보완적이며, 끊임없이 변화를 거듭하며 균형을 이루는 관계를 의미합니다.",
         "오행은 이 음양의 토대 위에 자연계의 변화 원리를 보다 구체적으로 설명하기 위한 다섯 가지 요소입니다. 오행은 목, 화, 토, 금, 수라는 다섯 가지로 구성되며, 이들은 단순히 물질적 요소를 가리키는 것이 아니라 사물과 현상을 바라보는 다원적 관점을 제공합니다.",
@@ -364,164 +985,240 @@ function buildSectionReferenceText(input: LlmGenerateInput, sectionNumber: numbe
     case 3:
       return [
         "## 3장 기준 원고/스타일",
-        "- 아래처럼 '일간 5항목 + 일지 5항목 + 종합' 구조를 유지하세요.",
-        "- 각 항목은 반드시 '제목 1줄 -> 특징 : -> 영향 :' 구조를 지키세요.",
+        "- 아래처럼 '일간 도입 + 일간 5항목 + 일지 도입 + 일지 5항목 + 종합' 구조를 유지하세요.",
+        "- 각 항목은 반드시 '제목 1줄 -> 빈 줄 -> 특징 : 한 줄 본문 -> 빈 줄 -> 영향 : 한 줄 본문' 구조를 지키세요. 특징·영향 본문은 문장 중간에 줄바꿈을 넣지 마세요.",
         "- 항목과 항목 사이는 반드시 빈 줄로 구분하세요.",
+        "- '경자' 아래 예시는 문장 밀도·한자 병기 패턴만 참고하고, 간지·이름·오행 서술은 계산 데이터의 일주로 반드시 바꾸세요.",
         "",
-        "경자 일주에 대한 성격을 분석해드리겠습니다.",
+        "OOO님, 경자 일주에 대한 성격을 분석해드리겠습니다.",
         "일간을 기준으로 한 성격 분석",
         "",
+        "경자(庚子) 일주는 천간이 경(庚)으로 태어난 사람을 의미합니다. 경금(庚金)은 강한 금속을 상징하며, 이는 성격에 단단하고 결단력 있는 모습을 드러냅니다.",
+        "",
         "강한 결단력",
-        "특징 :",
-        "영향 :",
+        "특징 : 경금은 스스로의 의지가 강하고, 한번 결정한 일을 쉽게 물러서지 않는 특성을 보입니다.",
+        "영향 : 이러한 성격으로 인해 목표를 세운 후 실행력 있게 추진하며, 타인에게 신뢰받는 영향을 줍니다.",
         "",
         "책임감 있는 성향",
-        "특징 :",
-        "영향 :",
+        "특징 : 경금은 자신이 맡은 일에 대해 끝까지 책임을 지려는 성향이 강합니다.",
+        "영향 : 주변에서는 믿음직스럽다는 평가를 받을 수 있지만, 일이 과중될 경우 스트레스를 받을 가능성도 있습니다.",
         "",
         "원칙과 규율 존중",
-        "특징 :",
-        "영향 :",
+        "특징 : 경금은 규칙과 원칙을 중시하고, 자신의 기준을 지키려는 측면이 두드러집니다.",
+        "영향 : 체계적으로 일을 처리하나, 때로는 융통성이 부족하다는 인상을 줄 수 있습니다.",
         "",
         "솔직한 표현 방식",
-        "특징 :",
-        "영향 :",
+        "특징 : 경금은 자신의 생각을 숨기지 않고 직설적으로 표현하는 경향이 강합니다.",
+        "영향 : 솔직함은 투명성을 더하나, 상대방에게 감정적인 오해를 불러일으킬 수 있습니다.",
         "",
         "단단한 끈기와 인내",
-        "특징 :",
-        "영향 :",
+        "특징 : 경금은 어려운 상황에서도 쉽게 무너지지 않는 끈기를 가지고 있습니다.",
+        "영향 : 장기적인 프로젝트나 상황에서 뛰어난 성과를 내지만, 때로는 자신의 어려움을 잘 드러내지 않기도 합니다.",
+        "",
         "일지를 기준으로 한 성격 분석",
         "",
+        "경자(庚子) 일주의 지지는 자(子)이므로 일지에 자수(子水)의 성격이 드러납니다. 자수(子水)는 겨울의 물로, 지혜와 유연함, 그리고 깊이를 상징합니다.",
+        "",
         "유연한 사고방식",
-        "특징 :",
-        "영향 :",
+        "특징 : 자수는 물처럼 흐름에 따라 유연하게 대처할 수 있는 성향을 가집니다.",
+        "영향 : 다양한 상황에 적응하는 능력이 뛰어나며, 주변의 변화에도 비교적 잘 대응합니다.",
         "",
         "지혜와 직관",
-        "특징 :",
-        "영향 :",
+        "특징 : 자수는 깊은 사고와 함께 직관적인 면모를 가지고 있습니다.",
+        "영향 : 문제를 해결할 때 본질을 꿰뚫는 통찰력을 발휘하며, 주변 사람들에게 현명하다는 인상을 줄 수 있습니다.",
         "",
         "내향적인 성향",
-        "특징 :",
-        "영향 :",
+        "특징 : 자수는 감정을 내면으로 숨기는 경향이 있어 감정 표현이 절제된 모습을 보입니다.",
+        "영향 : 이런 성향은 차분하고 안정적이지만, 감정을 밖으로 드러내지 않아 오해를 살 가능성도 있습니다.",
         "",
         "예민함",
-        "특징 :",
-        "영향 :",
+        "특징 : 자수는 세세한 부분까지 신경을 쓰는 예민함을 가지고 있습니다.",
+        "영향 : 타인에게 세심한 배려를 보여주지만, 지나친 걱정을 하거나 스트레스를 받을 가능성도 있습니다.",
         "",
         "빠른 배움",
-        "특징 :",
-        "영향 :",
+        "특징 : 물처럼 유동적인 자수는 새로운 지식이나 환경을 빨리 흡수하는 학습 능력이 뛰어납니다.",
+        "영향 : 다른 사람보다 새로운 일에 금방 적응하며, 다방면에 걸쳐 능력을 발휘합니다.",
         "",
         "일간과 일지를 기준으로 한 종합적인 성격분석",
-        "- 실제 내용은 예시를 복붙하지 말고, 대상자의 일주에 맞게 전부 바꾸세요.",
+        "경자(庚子) 일주는 강하고 단단한 경금(庚金)의 추진력과 자수(子水)의 지혜로움과 유연함이 결합된 성격을 가지고 있습니다. 이들은 큰 목표를 향해 끊임없이 나아가며, 깊은 사고력과 직관으로 다양한 문제를 효과적으로 해결할 수 있는 능력이 탁월합니다.",
+        "- 실제 작성 시 예시 문장을 복붙하지 말고, 대상자 일주·이름·오행에 맞게 전부 새로 쓰세요.",
       ].join("\n");
     case 4:
       return [
         "## 4장 기준 원고/스타일",
-        "- 반드시 연주 -> 월주 -> 일주 -> 시주 -> 종합 순서를 지키세요.",
-        "- 각 기둥마다 '먼저/다음으로/마지막으로' 전환 문장을 넣고, 천간 십성과 지지 십성을 모두 풀어주세요.",
-        "- 예시처럼 초년기/청년기/중년기/말년기 의미를 연결해 서술하세요.",
+        "- 연주→월주→일주→시주→종합 순서, 각 기둥마다 전환+시기 설명 → '○간에는 …이, ○지에는 …이 위치' 한 문단 → 천간 십성 장문 → 지지 십성 장문.",
+        "- 문단 안 줄바꿈 금지. 십성 이름·간지는 계산 데이터와 동일. 아래는 문장 밀도·전개만 참고(간지·십성은 본인 사주로 반드시 교체).",
+        "",
+        "먼저, 초년기를 의미하는 연주부터 풀이해드리겠습니다. 연주는 어린 시절의 환경과 초반 사회화 과정에서 형성된 태도를 읽는 데 도움이 됩니다.",
+        "연간에는 상관이, 연지에는 겁재가 위치하고 있습니다.",
+        "연간의 상관은 창의성과 개성, 그리고 자유로운 사고를 나타냅니다. 초년기에는 틀에 얽매이기를 싫어하고 자신만의 독창적인 방식으로 표현하길 원했을 가능성이 높습니다. 또한 적극적으로 자신을 드러내며, 다른 사람들과 차별화된 행동으로 주목받았을 것입니다. 다만 상관은 지나치게 표현 욕구가 강하면 갈등을 유발할 수도 있으니, 이 시기에 간혹 주변과의 조화를 이루는 데 어려움을 겪었을 가능성도 있습니다.",
+        "연지의 겁재는 형제, 친구 같은 동료들과의 관계와 경쟁을 뜻합니다. 초년기에는 이러한 대인관계를 통해 성장하고, 자신의 위치를 찾기 위해 다소 경쟁적인 모습을 보였을 가능성이 큽니다. 겁재의 특징이 남을 도우며도 자신을 지키는 것이기에, 적극적이고 도전적인 성향이 초년기의 특징으로 나타났을 것입니다.",
+        "(이하 월·일·시 기둥도 위와 같은 밀도로 이어가고, 종합은 시기 흐름을 묶는 장문 2문단으로 마무리하세요.)",
       ].join("\n");
     case 5:
       return [
         "## 5장 기준 원고/스타일",
-        "- 반드시 연주 -> 월주 -> 일주 -> 시주 -> 종합 순서를 지키세요.",
-        "- 각 기둥의 십이운성을 삶의 시기, 에너지 강약, 전환점, 주의점까지 포함해 설명하세요.",
-        "- 예시처럼 각 운성이 가진 상징을 먼저 풀고, 그 다음 실제 삶의 흐름으로 이어가세요.",
+        "- 도입 → 연주→월주→일주→시주 → 종합 순서. 각 기둥: 전환+시기 설명 → '○주에는 운성(漢字) 위치' 한 문단 → 운성 해설 장문 한 문단.",
+        "- 문단 안 줄바꿈 금지. 아래 운성·한자는 예시일 뿐이며, 계산 데이터의 십이운성으로 반드시 바꿀 것.",
+        "",
+        "이 사주의 십이운성을 보면, 각각의 운성들이 그 사람의 삶에서 중요한 시기와 흐름을 보여주고 있습니다. 하나씩 살보면서 전체적인 흐름을 설명해드리겠습니다.",
+        "먼저, 초년기를 의미하는 연주부터 풀이해드리겠습니다. 연주에는 제왕(帝旺)이 위치하고 있습니다.",
+        "제왕은 십이운성 중 가장 강한 에너지를 나타내며, 성취와 권위를 상징합니다. 초년기에 이른 나이에 이미 자신감과 리더십을 발휘하며 주목받는 존재였을 가능성이 큽니다. 가정에서도 주위의 사랑과 지원을 받으며 성장했으며, 어린 나이에도 또래보다 성숙한 면모를 보이며 주목받았을 것입니다. 사회적으로도 두각을 나타낼 수 있는 자질을 초년기부터 갖추게 되었을 것으로 보입니다.",
+        "(월·일·시도 위와 같은 밀도로 이어가고, 종합은 네 시기를 아우르는 장문으로 마무리하세요.)",
       ].join("\n");
     case 6:
       return [
         "## 6장 기준 원고/스타일",
-        "- 먼저 '십이신살에 대해 먼저 풀이해보겠습니다!'를 넣으세요.",
-        "- 신살은 연주 -> 월주 -> 일주 -> 시주 순으로 설명하세요.",
-        "- 그 다음 '이제 귀인에 대해서 알아볼까요?'를 넣고 귀인을 설명하세요.",
-        "- 예시처럼 마지막에는 전체 삶의 흐름을 한 번에 종합 정리하세요.",
+        "- 도입 2문단 → 십이신살에 대해 먼저 풀이해보겠습니다! → 연·월·일·시 신살 각각 '위치' 문장+장문 해설 → 이제 귀인에 대해서 알아볼까요? → 귀인 있는 기둥만 장문 → 귀인 일반 설명 → 종합 장문.",
+        "- 문단 안 줄바꿈 금지. 아래 년살·역마살 등은 예시이며 신살·귀인 이름은 계산 데이터로 반드시 교체.",
+        "",
+        "이 사주를 보면, 십이신살과 귀인의 조합이 어떻게 이 사람의 삶에 영향을 미칠지 알 수 있습니다. 각각의 요소를 하나씩 살보면서 풀어볼게요.",
+        "십이신살에 대해 먼저 풀이해보겠습니다!",
+        "먼저, 초년기를 의미하는 연주부터 분석해보겠습니다. 연주에는 년살이 위치하고 있습니다.",
+        "년살은 연결과 인연의 기운을 나타내며, 초년기에 이 기운이 작용한다는 것은 이 사람이 어린 시절부터 다양한 인연을 경험했을 가능성을 보여줍니다. 주변 환경과 사람들의 영향을 많이 받으며, 사회성과 인간관계를 배우는 과정에서 성장했을 것입니다. 하지만 이러한 인연의 폭이 넓다 보니 때로는 혼란을 겪을 수도 있습니다. 어린 시절부터 균형 잡힌 판단력을 기르는 것이 중요하겠습니다.",
+        "(월·일·시 신살도 같은 밀도로 이어가세요. 이제 귀인에 대해서 알아볼까요? 이후 귀인 있는 기둥만 장문으로 풀고, 종합으로 네 시기를 묶어 마무리하세요.)",
       ].join("\n");
     case 7:
       return [
         "## 7장 기준 원고/스타일",
-        "- 반드시 다음 소제목을 모두 포함하세요.",
+        "- 소제목 순서 고정. 문단 안 줄바꿈 금지. 일간 음양오행·신살·귀인은 계산 데이터와 일치. 아래는 밀도·구조만 참고(양금 등은 본인 일간으로 교체).",
+        "",
         "연애운 풀이",
+        `${input.name}님의 연애운은 감정의 깊이와 관계의 속도 조절을 함께 봐야 하는 흐름입니다. 감정이 생겼을 때 빠르게 확신을 만들기보다, 상대와의 대화 빈도·약속 이행·갈등 해결 방식이 안정적인지 시간을 두고 확인할수록 만족도가 높아질 가능성이 큽니다.`,
+        "",
         "일간 성격과 연애 성향",
-        "연애에서 나타나는 장단점",
+        "일간이 양금(陽金)으로 강인하고 냉철한 성격을 가졌습니다. 겉으로는 이성적인 모습이 두드러지지만, 내면적으로는 신뢰를 중요시하며 안정적인 관계를 선호합니다. 사랑에 있어서는 확실한 기준을 두며 쉽게 마음을 열지 않지만, 자신의 기준에 부합하는 상대를 만나면 진지하고 헌신적인 모습으로 관계를 이어가는 편입니다.",
+        "",
         "연애 시기와 방법",
+        "언제: 청년기와 중년기에 좋은 연애운을 가질 가능성이 큽니다. 특히 중년기에는 운이 상승해 안정적인 사랑을 기대할 수 있습니다.",
+        "어디서: 일에 열중하면서 혹은 사회적인 모임을 통해 인연을 만날 가능성이 높습니다.",
+        "누구와: 지적이고 현실적인 감각을 가진 사람과 잘 맞습니다. 나의 가치관과 비슷한 실리적 성향의 상대가 이상적입니다.",
+        "어떻게: 신중하고도 책임감 있는 태도로 다가가는 것이 중요합니다. 상대방에게 나의 진심을 조금 더 열어 보인다면 더 깊은 관계로 발전할 수 있습니다.",
+        "",
         "살과 귀인의 영향",
-        "성공적인 연애를 위한 조언",
-        "나의 결혼운",
-        "이상적인 배우자상과 피해야할 배우자상",
-        "배우자와의 관계 전망",
-        "연애에서 피해야 할 점",
-        "종합분석",
+        "초년: 년살이 작용하여 연애운은 다소 불안정할 수 있습니다. 청년: 역마살의 영향으로 인연이 자주 바뀔 수 있으나, 문창귀인의 도움이 있어 긍정적이고 지적인 분위기의 만남이 이루어질 확률이 높아집니다. 중년: 육해살로 인해 한때의 방해나 갈등이 있을 수 있지만, 이를 극복하면 인연이 더욱 깊어질 가능성이 있습니다. 말년: 화개살과 천을귀인의 조화로 내면적으로 성숙해지며, 평온하고 온화한 연애를 이어가는 시기로 보는 것이 맞습니다.",
+        "(이하 성공적인 연애~종합분석도 같은 밀도로 이어가세요.)",
       ].join("\n");
     case 8:
       return [
         "## 8장 기준 원고/스타일",
-        "- 아래 소제목과 순서를 그대로 따르세요.",
+        "- 소제목 순서 고정. 문단 안 줄바꿈 금지. 간지·십성·십이운성·신살·귀인은 계산 데이터와 일치. 아래 경금·계유 등은 예시.",
+        "",
         "재물운 풀이",
-        "나의 일간 성격과 재물운",
+        `${input.name}님의 재물운은 한 번의 기회보다 관리 습관과 선택의 속도에서 차이가 벌어질 가능성이 있습니다. 큰 수입이 들어오는 순간보다, 그 수입을 지키고 다시 불릴 구조를 얼마나 일찍 만들었는지가 장기 성과를 좌우할 수 있습니다.`,
+        "",
+        "일간 성격과 재물운",
+        "나의 일간은 경금으로, 단단하고 강한 금의 기운을 가지고 있습니다. 이는 의지가 강하고 목표를 명확하게 설정하며 이를 이루기 위한 끈기와 노력을 나타냅니다. 재물운과 관련해서는 탐구심과 실리적인 판단으로 안정적인 재물 축적에 유리합니다. 금은 재물과 깊은 상관이 있는 오행으로, 적절한 계획과 실행을 통해 재물 형성이 가능할 것입니다.",
+        "",
         "시간에 따른 재물운의 흐름",
-        "재물운이 크게 들어오는 시기",
+        "초년기 : 초년기를 상징하는 계유는 상관과 겁재가 존재하며, 제왕지에 해당합니다. 이 시기는 재물보다 학습과 자기 계발에 집중하며 자신의 능력을 발전시킬 기틀을 마련하는 시기입니다.",
+        "(청년·중년·말년도 각각 해당 간지·십성·십이운성·신살을 넣어 같은 밀도로 이어가세요.)",
+        "",
         "살과 귀인의 영향",
-        "주의해야 될 시기",
-        "어떻게 재물을 모으게 될까?",
-        "성공적인 재물의 축적 방법",
-        "종합분석",
-        "- 예시처럼 초년/청년/중년/말년 흐름을 세부적으로 연결해 설명하세요.",
+        "역마살과 육해살, 화개살이 각각의 시기에 영향을 미칩니다. 귀인으로는 청년기의 문창귀인의 지원과 말년기의 천을귀인이 특히 재물 축적에 중요한 조언을 제공할 수 있습니다.",
+        "(이하 재물 크게 들어오는 시기~종합분석도 샘플 밀도로 마무리하세요.)",
       ].join("\n");
     case 9:
       return [
         "## 9장 기준 원고/스타일",
-        "- 아래 소제목과 순서를 그대로 따르세요.",
+        "- 소제목 순서 고정. 문단 안 줄바꿈 금지. 일간·월간·월지·일지·시지 십성·신살·귀인은 계산 데이터와 일치. 아래 경금·식신·겁재 등은 예시이며 본인 사주로 반드시 교체.",
+        "",
         "직업운 풀이",
+        `${input.name}님의 직업운은 재능을 어디에 쓰느냐와 함께, 조직과 사업 맥락에서 역할을 어떻게 유지하느냐에서 결과가 갈릴 수 있습니다.`,
+        "",
         "나의 일간 성격에 맞는 직업, 직무",
+        "나의 일간은 경금으로, 경금은 단단하고 강인한 에너지를 지닌 금속을 상징합니다. 이성적이고 논리적이며 체계적인 사고와 분석력을 갖추고 있어 세부적인 부분까지 철저히 검토하는 성향을 보입니다. 이러한 특성은 법률, 공학, 금융, 정보기술, 건축 및 관리와 같이 논리적 사고와 체계적인 접근이 필요한 직종에서 두각을 나타낼 수 있습니다. 또한 경금은 정의와 규칙을 중시하므로 공공기관, 연구 분야, 행정 및 지도력 요구 직무에서도 두드러진 활약이 기대됩니다.",
+        "",
         "나의 직장운",
+        "나의 사주에서 월간과 월지가 청년기 직장운을 나타냅니다. 월지가 '식신'인데, 이는 노력과 성실함을 통해 직장에서 인정받는 운을 가지고 있음을 나타냅니다. 현재 속한 직장에서 내가 창의성을 발휘하고, 차분한 업무 태도를 유지하며, 자수성가하는 능력을 보일 가능성이 큽니다. 하지만 '겁재'가 월간에 있기 때문에 경쟁 구도가 강할 수 있습니다. 주변 동료나 파트너와 의견 충돌이나 갈등이 있을 수 있으니 이점을 유의해야 합니다. 좋은 인간관계를 쌓고 협력적인 태도를 유지하면, 안정적으로 성장할 수 있는 직장운을 가진 상황입니다.",
+        "",
         "나의 사업운",
+        "사업운은 일지와 시지에서 확인할 수 있습니다. 나의 일지에는 '비견', 시지에는 '정인'이 자리하고 있습니다. '비견'은 독립적 성향을 이해해야 함을 알려줍니다. 나와 뜻이 맞는 동업자나 파트너를 만날 가능성이 낮을 수 있으므로, 홀로 계획하고 실행하는 것이 더 적합할 수 있습니다. 하지만 '정인'의 에너지가 함께 있기에 사업 영역에서 지혜롭고 신중하게 전략을 세운다면, 큰 결실을 맺을 수 있습니다. 다만 지나치게 완고하거나 혼자 모든 걸 책임지려는 태도는 피하는 것이 좋습니다. 긴밀한 협력 관계가 필요한 시기에는 적극적으로 전문가의 도움을 구하는 것도 현명한 선택입니다.",
+        "",
         "십이신살과 귀인의 영향",
+        "십이신살에서는 '역마살', '육해살', '화개살'이 두드러집니다. '역마살'은 변화와 이동을 의미하는데, 활동적으로 움직이는 직업이나 여행, 대외활동이 중요한 분야에서 유리하게 작용할 수 있습니다. '육해살'은 대인관계에서 작은 마찰이 있을 수 있음을 나타냅니다. 하지만 이를 통해 인간적으로 많은 것을 배우며 깊이를 더하게 됩니다. '화개살'은 내면의 감성과 창의성을 드러내는 살로, 예술, 종교적 접근, 혹은 연구와 같은 내면이 풍부한 일에 유리하게 작용합니다. 귀인으로는 '문창귀인'과 '천을귀인'이 있습니다. '문창귀인'은 지혜와 학문적 도움을 상징하며, 나의 의견과 창의력이 빛을 발할 때 주변에서 칭송과 지원을 받을 수 있음을 보여줍니다. '천을귀인'은 위기 상황에서 돕는 조력자가 나타나는 좋은 기운이니, 어려운 시기를 긍정적으로 극복할 수 있습니다.",
+        "",
         "성공적인 직장생활을 위한 조언",
+        "경금의 성향으로 인해 업무 처리에서 너무 강직하거나 완벽주의적 태도를 보일 수 있습니다. 이는 주변 동료들에게 부담으로 작용할 가능성이 있으니, 유연성을 기르는 것이 중요합니다. 또한 월간의 '겁재'는 경쟁 분위기를 형성하기 쉽지만, 갈등을 부드럽게 풀어가는 스킬을 기르면 더 큰 신뢰와 존경을 얻을 수 있습니다. '정인'의 안정 에너지를 바탕으로 상사나 선배와 조화로운 관계를 쌓는다면, 장기적으로 직장에서 중요한 역할을 담당하게 될 것입니다.",
+        "",
         "종합분석",
+        "나의 사주는 경금의 특성을 통해 이성적이고 논리적인 분야에서 두각을 나타낼 가능성을 보여줍니다. 직장에서는 경쟁에 휘말릴 수 있으나, 이를 극복하고 안정적인 경로를 찾을 수 있는 운을 가졌습니다. 사업에서는 독립적 성향이 강하지만 '정인'의 영향 덕분에 신중한 기획과 전략으로 성공적인 결과를 도출할 가능성이 높습니다. 십이신살과 귀인의 조화로 인해 이동과 변화를 활용하며 귀중한 기회와 도움을 받을 수 있는 운이 형성돼 있습니다. 결국, 직장이나 사업에서 꾸준한 노력과 열린 마음의 태도를 유지하면 안정적이고 성공적인 삶을 만들어 갈 수 있는 운명을 타고났습니다.",
       ].join("\n");
     case 10:
       return [
         "## 10장 기준 원고/스타일",
-        "- 아래 소제목과 순서를 그대로 따르세요.",
+        "- 소제목 순서 고정. 문단 안 줄바꿈 금지. 음양·오행 수치·십이운성·신살·귀인은 계산 데이터와 일치. 아래 수·금·제왕·병 등은 예시이며 본인 사주로 반드시 교체. 의학 진단 표현은 쓰지 말고 생활·예방 관점만.",
+        "",
         "건강운 풀이",
+        `${input.name}님의 건강운은 피로가 쌓이는 방식과 회복 리듬이 어떻게 무너지는지를 함께 보는 편이 더 정확합니다.`,
+        "",
         "나의 건강운",
+        "나의 사주는 음의 기운이 강하며, 특히 수(水)와 금(金)의 기운이 두드러집니다. 이러한 기운은 신장과 방광, 폐와 관련 있는 건강 문제를 유발할 가능성이 있으며, 대체로 차가운 기운과의 균형을 맞추는 것이 중요합니다. 또한, 상관과 겁재의 기운이 강하므로 감정 기복으로 인해 오는 스트레스나 신경성 질환에 유의해야 합니다. 정관과 정인이 함께 있어 신체적으로 체력이 약해질 때 자연스럽게 회복하려는 힘이 존재하지만, 기본적으로는 건강 관리에 세심한 노력이 필요합니다.",
+        "",
         "십이신살과 귀인의 영향",
+        "십이신살 중 역마살, 육해살, 화개살이 나타나는데 이는 건강운에서 변화와 불안정성을 가져올 수 있음을 의미합니다. 역마살은 많이 움직이고 활동량이 많을 시기에 과로로 인해 건강에 영향을 받을 수 있음을 나타냅니다. 육해살은 관계적 스트레스나 정신적인 압박에서 오는 건강 문제에 유의해야 함을 암시합니다. 화개살의 경우 마음이 예민해지고 생각이 많아질 수 있어 스트레스로 인한 간접적 건강 문제가 나타날 수 있습니다. 귀인으로는 천을귀인이 있어 어려운 상태에서도 회복력이 발휘될 가능성이 크며, 도움을 주거나 인도해 줄 인연을 통해 건강을 회복하는 기회를 얻을 수 있습니다.",
+        "",
         "시기에 따른 나의 건강운",
+        "초년기 : 초년에는 제왕의 기운 덕분에 신체적으로 강인하며 활발한 활동이 가능할 것입니다. 다만 처음에는 과도한 에너지 소모로 인해 피로 누적에 주의해야 합니다. 신장이나 방광과 같은 수(水)와 관련된 질환에 취약할 가능성이 높으니, 따뜻한 환경을 만들어야 합니다.",
+        "청년기 : 청년기에는 병(病)의 기운이 있어 건강 면에서 불안정할 수 있습니다. 특히 이 시기에는 스트레스로 인해 폐와 신경계 건강이 악화될 수 있으니, 과도한 작업이나 책임을 피하고 적절히 휴식을 취해야 합니다.",
+        "중년기 : 중년기에는 상관의 기운이 더욱 두드러지며, 의욕이 강한 동시에 체력이 약해질 가능성이 있습니다. 이 시기에는 심신의 균형을 맞추는 활동이 필요하며, 금(金)의 과도한 기운으로 인해 폐질환이나 피부 질환에 주의해야 합니다.",
+        "말년기 : 말년에는 묘(墓)의 기운이 작용해 에너지가 축소되고 신체적으로 약화될 수 있습니다. 특히 소화기 계통과 관련된 질병에 유의해야 하며, 이 시기에는 정서적 안정과 소화기의 건강 관리가 중요합니다.",
+        "",
         "주의해야 할 질병",
+        "폐질환 : 금(金)의 기운이 강하게 작용함에 따라 폐와 관련된 건강 문제가 생길 가능성이 있습니다. 환절기와 건조한 환경에 특히 주의를 기울여야 합니다.",
+        "신경계 질환 : 상관과 겁재의 기운으로 인해 스트레스를 받았을 때 신경계 질환이나 정서적 문제가 발생할 수 있습니다. 불면증이나 우울증과 같은 증세에 주의가 필요합니다.",
+        "소화기 계통 : 말년에는 시주의 음토(陰土)로 인해 소화기 약화가 우려됩니다. 소화 기능 관리와 식습관 조정이 필요합니다.",
+        "",
         "추천 운동",
+        "유산소 운동을 중심으로, 조깅이나 걷기와 같이 몸을 순환시키는 활동을 권장합니다. 특히 폐와 신경계를 강화하기 위한 요가나 명상도 좋은 선택입니다. 중년기 이후로는 근력 운동과 함께 무리하지 않는 범위에서의 스트레칭도 신체 안정에 도움을 줄 것입니다.",
+        "",
         "추천 식단",
+        "차고 건조한 특성을 상쇄하기 위해 따뜻하고 수분감 있는 음식이 적합합니다. 미역, 다시마 같은 해조류와 대추, 생강을 활용한 차가 몸을 따뜻하게 하고 면역력 강화에 좋습니다. 과일로는 사과, 귤처럼 비타민 C가 풍부한 것을 추천하며, 말년에는 소화가 쉬운 죽이나 부드러운 음식 위주로 섭취하는 것이 좋습니다.",
+        "",
         "종합분석",
-        "- 예시처럼 초년/청년/중년/말년의 건강 리듬과 질환 주의 포인트를 모두 풀어주세요.",
+        "나의 건강운은 수와 금의 기운이 강하게 작용하면서 신체적으로는 폐와 신경계, 정신적인 부분과 관련된 문제가 주로 나타날 가능성이 높습니다. 특히 스트레스 관리와 균형 잡힌 생활습관이 건강 유지의 핵심이 됩니다. 귀인의 도움으로 회복의 기회가 존재하지만, 먼저 적절한 건강 관리와 예방에 주력해야 합니다. 꾸준한 운동과 더불어 따뜻하며 부담 없는 식단을 생활화하는 것이 가장 중요한 관리 방법입니다.",
       ].join("\n");
     case 11:
       return [
         "## 11장 기준 원고/스타일",
-        "- 먼저 대운 전체 흐름을 설명하는 도입 문단 1개를 쓰세요.",
-        "- 그 다음 개별 대운 설명이 총 10개 나와야 합니다.",
-        "- 각 대운은 반드시 다음 순서를 지키세요.",
-        "이번 대운의 천간은 ...",
-        "이번 대운의 지지는 ...",
-        "천간의 십성은 ...",
-        "지지의 십성은 ...",
-        "십이운성은 ...",
-        "정리해보면 ...",
-        "- 예시처럼 학업/재물/인간관계/건강 등 실생활 연결 문장을 포함하세요.",
+        "- 소제목 '나의 N세 대운' 아래 본문은 문단 안 줄바꿈 금지. 천간·지지·십성·십이운성은 계산 데이터와 일치. 아래 임수·경금·술토·식신·편인·쇠 등은 예시이며 본인 대운으로 반드시 교체.",
+        "",
+        "나의 22세 대운",
+        "이번 대운의 천간은 임(壬), 지지는 술(戌)입니다.",
+        "임수(壬水)는 장원종님의 경금(庚金)과 상생 관계에 있습니다. 금이 수를 생한다는 의미는 경금이라는 강한 금속이 임수라는 큰 물을 만들어낸다고 볼 수 있습니다. 이는 장원종님이 이 시기에 자신의 능력과 역량을 발휘해 무언가를 이루는 데 유리한 흐름을 나타냅니다. 특히 학업, 자기 계발, 창의적인 활동에서 좋은 성과를 기대할 수 있는 시기입니다. 다만, 상생이 지나치게 강하게 작용할 경우 에너지가 소진될 수 있으므로 무리하지 않는 것이 중요합니다.",
+        "술토(戌土)는 경금(庚金)과 상생 관계에 있습니다. 토가 금을 생해주는 흐름이므로, 재물적으로 안정감을 얻을 수 있는 시기입니다. 술토는 양토로서 보다 활동적이며, 현실적인 기반을 다지는 기운이 강합니다. 이로 인해 장원종님은 사업이나 재정적인 면에서 성과를 준비하고 이를 통해 안정적인 환경을 만들어갈 수 있을 것입니다. 다만, 과도한 욕심을 부리거나 계획 없이 무리한 확장을 시도한다면 안정감이 흔들릴 가능성도 있습니다.",
+        "천간의 십성은 식신(食神)입니다. 식신은 자신의 역량을 활용해 새로운 것을 창출하거나 나누는 에너지를 뜻합니다. 이 시기는 장원종님이 자신의 재능을 발휘해 사람들에게 인정을 받는 흐름이 강할 것입니다. 식신은 여유롭고 부드러운 성격을 나타내기 때문에, 이 시기에 지나치게 경쟁적인 자세보다는 여유를 가지고 타인과의 소통을 중요시하는 것이 좋습니다. 이러한 기운은 연애와 인간관계에서도 긍정적인 영향을 미칠 가능성이 큽니다.",
+        "지지의 십성은 편인(偏印)입니다. 편인은 직관적이고 창의적인 에너지를 나타내는 십성으로, 이 시기에 학업이나 자기 계발에 깊이 몰두할 수 있는 운을 가지고 있습니다. 특히 기존의 틀에서 벗어나 새로운 방식을 고민하거나, 평소와 다른 관점에서 문제를 해결하는 능력이 강화될 것입니다. 다만, 편인은 때로는 지나친 고민이나 의심으로 인해 에너지가 소모될 수 있으니 스스로 균형을 잘 맞추는 것이 필요합니다.",
+        "십이운성은 쇠(衰)입니다. 쇠운은 에너지가 다소 약해진 상태를 나타내지만, 이는 새로운 시작을 준비하는 시간으로 활용할 수 있습니다. 장원종님은 이 시기에 너무 성급하게 무언가를 추진하기보다는, 현재의 상황을 점검하고 앞으로의 발전을 위한 계획을 세우는 것이 적합합니다. 건강 면에서도 무리하지 않고 규칙적인 생활을 유지하는 것이 중요하며, 과로를 최대한 피해야 하는 시기입니다.",
+        "정리보면, 이번 대운은 장원종님이 자신의 능력과 재능을 활용해 안정적인 기반을 다질 수 있는 시기입니다. 재물과 사업적으로 좋은 기운이 흐르며, 학업이나 자기 계발에서도 긍정적인 성과를 기대할 수 있을 것입니다. 다만, 에너지가 지나치게 분산되지 않도록 조절하며, 계획적이고 균형 있는 태도를 유지하는 것이 중요합니다. 연애와 인간관계에서는 식신의 긍정적인 기운이 강하므로 사람들과의 관계를 따뜻하게 유지한다면 만족스러운 결과를 얻을 가능성이 크겠습니다.",
+        "- 실제 작성 시 이름·간지·십성·십이운성은 전부 본인 데이터로 바꾸고, 10개 대운을 동일 밀도로 반복하세요.",
       ].join("\n");
     case 12:
       return [
         "## 12장 기준 원고/스타일",
-        "- 먼저 연운 전체 흐름을 설명하는 도입 문단 1개를 쓰세요.",
-        "- 그 다음 최근 6개 연도 각각을 설명하세요.",
-        "- 각 연도는 반드시 다음 순서를 지키세요.",
-        "나의 20XX년 연운",
-        "나의 20XX년 연운 : 천간 ...",
-        "나의 20XX년 연운 : 지지 ...",
-        "나의 20XX년 연운 : 천간 십성 ...",
-        "나의 20XX년 연운 : 지지 십성 ...",
-        "나의 20XX년 연운 : 십이운성 ...",
-        "나의 20XX년 연운 종합",
-        "- 예시처럼 각 해마다 활동성, 책임감, 감정선, 선택 조언까지 연결해서 써주세요.",
+        "- 소제목 '나의 N년 연운 : …' 아래 본문은 문단 안 줄바꿈 금지. 연도·간지·십성·십이운성은 계산 데이터와 일치. 아래 병화·경금·오화·편관·정관·목욕 등은 예시이며 본인 연운으로 반드시 교체.",
+        "",
+        "나의 2026년 연운",
+        "나의 2026년 연운 : 천간 병",
+        "2026년 연운의 천간은 병화입니다. 병화는 태양과 같은 불의 에너지를 의미하며, 경금에게는 따스한 빛으로 자신의 본연의 빛을 반사하도록 돕는 작용을 합니다. 경금은 본래 단단하고 차가운 성질을 지녔지만, 병화가 들어옴으로써 그 차가움을 녹이고 온화함을 더해주는 시기로 볼 수 있습니다. 이 시기 장원종님은 자신의 능력과 역할을 보다 분명히 드러내며 외부로 활발히 발산하려는 욕구가 강해질 수 있습니다.",
+        "또한 병화는 장원종님에게 편관으로 작용하기 때문에 책임감과 도전의식이 자연스레 강화됩니다. 사회적 위치나 업무에서 새로운 책임이 주어질 가능성이 높아지고, 이를 통해 자신의 가치를 더 높일 기회를 가질 수 있을 것으로 예상됩니다. 여기에 따르는 부담이 없지는 않지만, 이를 성실히 감당해 나간다면 더욱 견고한 발전을 이루는 기반이 마련될 것으로 보입니다. 병화 천간은 장원종님에게 에너지를 부여하면서 동시에 성장의 기회를 함께 가져다주는 의미로 다가올 수 있습니다.",
+        "나의 2026년 연운 : 지지 오",
+        "2026년 연운의 지지는 오화입니다. 오화는 한여름의 뜨거운 태양과 같아 생동감 넘치고 활발한 에너지를 뜻합니다. 이러한 기운은 장원종님에게 외부 활동이나 사회적 관계를 넓히고 적극적으로 자기 표현을 할 수 있는 환경을 만들어줍니다.",
+        "오화는 또한 열정과 의욕을 상징하며, 장원종님의 내면의 동기를 더욱 강렬하게 자극할 가능성이 있습니다. 새로운 도전을 시작하거나 남들 앞에서 두각을 나타낼 수 있으니 이 시기에 용기 있는 행동으로 기회를 잡는 것이 중요합니다. 다만, 과한 열정이 오히려 주변과의 갈등으로 이어질 수 있으므로 균형감 있는 태도가 필요합니다.",
+        "나의 2026년 연운 : 천간 십성 편관",
+        "편관은 경금 일간에게 외부에서의 도전과 경쟁, 스스로를 단련시키는 기회를 의미합니다. 2026년에는 장원종님에게 책임감을 요구하는 상황이 주어지거나 목표를 성취하기 위해 자기 자신과의 싸움을 해야 하는 순간들이 많아질 가능성이 큽니다. 이 시기는 외부 환경이 더 강렬하게 느껴질 수 있지만, 이를 통해 내적인 성장을 이루는 중요한 시기로 이해할 수 있습니다.",
+        "편관은 또한 자제력과 균형 있는 결정을 요구하는 성격을 가지고 있습니다. 성급함으로 인해 실수를 반복하기보다는 차분히 계획을 세우고, 자신의 행동을 되돌아보는 태도가 필요합니다. 장원종님은 이 시기에 형성되는 자신의 태도와 행동이 이후에 더 큰 발전의 초석이 될 것을 염두에 두는 것이 중요합니다.",
+        "나의 2026년 연운 : 지지 십성 정관",
+        "지지 午(오)에서는 일간에게 정관(正官)이 작용합니다. 정관은 규칙과 질서를 따르고 안정과 책임감을 의미합니다. 2026년 장원종님은 주변 환경 속에서 자신의 역할을 명확히 하고, 책임감을 키우는 해가 될 가능성이 높습니다. 이 시기에는 자신의 상태를 철저히 관리하며 신뢰를 기반으로 사람들과의 관계를 쌓아가는 모습이 나타날 수 있습니다.",
+        "정관은 또한 체계적인 노력과 계획 속에서 결과를 만들어가는 과정을 뜻하기 때문에, 2026년 장원종님은 일의 흐름을 예측하며 한 걸음씩 나아가는 안정적인 모습을 보였을 가능성이 큽니다. 다만 지나치게 틀에 얽매이려고 한다면 답답함을 느낄 수 있으니 융통성을 갖추는 것이 중요합니다. 결국 이 시기의 정관은 장원종님이 자신의 한계를 명확히 알고 이를 극복하기 위한 과정으로 작용했다고 볼 수 있습니다.",
+        "나의 2026년 연운 : 십이운성 목욕",
+        "2026년 연운의 십이운성은 목욕으로 나타납니다. 목욕은 새로운 단계로 나아가기 위한 정화와 준비 과정을 상징합니다. 이는 장원종님께서 이전과는 다른 변화를 체감하며 다소 민감한 시기를 경험하게 될 가능성을 의미합니다.",
+        "목욕 단계는 외부 상황에 대한 영향을 더 크게 받을 수 있는 시기이기도 합니다. 이 시기에는 타인과의 관계나 주위 환경에서 오는 변동성이 장원종님의 삶에 큰 영향을 미칠 수 있었을 것입니다. 이는 정신적, 감정적으로도 변화에 대한 민감함을 느낄 가능성을 보여줍니다.",
+        "목욕의 기운은 새롭게 출발하기 전의 중요한 정리와 정화의 의미를 가지고 있습니다. 따라서 2026년은 장원종님에게 있어 새로운 시작을 준비하며 복잡한 상황을 정리하고 조율하는 시간이 되었을 것으로 보입니다.",
+        "나의 2026년 연운 종합",
+        "2026년 연운은 장원종님에게 활동성과 경쟁이 중심이 되는 해가 될 가능성이 높습니다. 병화 천간과 오화 지지가 나타나면서, 외부적으로는 역동적인 상황과 사람들과의 교류가 많아질 수 있습니다. 특히 편관과 정관이 함께 작용하게 되어 책임감과 규칙을 중요시하게 되는 경향이 형성될 것으로 예상됩니다.",
+        "십이운성이 목욕으로 나타나는 것은 장원종님이 외적인 활동과 표현을 통해 자신을 더욱 드러내는 시기임을 의미합니다. 다만 목욕이라는 측면에서는 다소 우유부단하거나 감정적인 부분이 확대될 가능성도 있습니다. 따라서 중요한 선택의 순간에는 지나치게 감정에 휘둘리지 않도록 신중함을 유지하는 것이 필요할 것입니다.",
+        "- 실제 작성 시 이름·연도·간지·십성·십이운성은 전부 본인 데이터로 바꾸고, 6개 연도를 동일 밀도로 반복하세요. 지지 십성 문단에서 다른 지지 이름(예: 자수)을 쓰지 말고 반드시 그 해 연지를 쓰세요.",
       ].join("\n");
     default:
       return "";
@@ -530,6 +1227,8 @@ function buildSectionReferenceText(input: LlmGenerateInput, sectionNumber: numbe
 
 function buildSectionGuardSuffix(input: LlmGenerateInput, sectionNumber: number): string {
   switch (sectionNumber) {
+    case 2:
+      return `\n\n${input.name}님은 이 장에서는 오행의 숫자와 음양 비율을 함께 보고, 평소 컨디션과 맞춰 해석해 보시면 적용이 쉬워집니다. 한 번에 모두 바꾸기보다 수면·활동·대화 리듬 중 한 가지만 먼저 조절해 보시는 것도 좋습니다.`;
     case 7:
       return `\n\n${input.name}님은 감정이 깊은 만큼 관계의 속도를 조절하는 연습이 중요합니다. 서운함이 쌓이기 전에 작게 표현하고, 확신이 없을 때는 상대를 시험하기보다 사실을 먼저 확인하는 편이 관계를 안정시키는 데 도움이 됩니다. 연애운은 결국 마음의 깊이만이 아니라 표현 방식과 타이밍에 따라 체감 차이가 크게 날 수 있습니다.`;
     case 8:
@@ -541,7 +1240,7 @@ function buildSectionGuardSuffix(input: LlmGenerateInput, sectionNumber: number)
     case 11:
       return `\n\n정리해보면 이번 대운은 ${input.name}님이 기준을 어떻게 쓰느냐에 따라 체감 차이가 크게 벌어질 수 있는 시기입니다. 무리한 확장보다 흐름 점검과 생활 리듬 조절을 함께 가져가시는 편이 좋습니다.`;
     case 12:
-      return `\n\n나의 연운 종합\n정리하면 이 해의 흐름은 결과 하나보다 선택의 순서와 감정 조절 방식에서 차이가 벌어질 수 있습니다. ${input.name}님은 기준을 먼저 세우고 움직일수록 훨씬 안정적으로 흐름을 활용하실 수 있어요.`;
+      return `\n\n${input.name}님은 12장을 읽을 때 연도마다 '나의 N년 연운 종합'까지를 한 묶음으로 보고, 다음 해와 비교하면 선택의 우선순위가 더 선명해질 수 있습니다. 감정과 기준이 겹칠 때는 잠시 기록으로 정리한 뒤 움직이는 편이 안정적입니다.`;
     default:
       return `\n\n정리하면 ${input.name}님은 이 장에서 보이는 흐름을 생활 장면과 함께 읽을수록 훨씬 현실적으로 적용하실 수 있습니다. 중요한 것은 한 번에 전부 바꾸는 것이 아니라, 지금 당장 조절할 수 있는 행동 하나를 정해 반복하는 것입니다.`;
   }
@@ -628,6 +1327,8 @@ function buildLastResortPaddingParagraph(
   sectionTitle: string,
 ): string {
   switch (sectionNumber) {
+    case 2:
+      return `${input.name}님은 음양오행을 읽을 때 숫자만 보지 말고, 강한 기운은 어디에 쓰이기 쉬운지·부족한 기운은 무엇을 보완하면 좋은지까지 생활 장면과 연결해 보시면 좋습니다.`;
     case 7:
       return `${input.name}님은 연애와 결혼운을 읽으실 때 감정의 크기보다 표현 방식과 관계의 속도를 함께 조절하는 쪽이 더 실질적인 변화를 만들 수 있습니다.`;
     case 8:
@@ -651,6 +1352,22 @@ function buildGuaranteedPaddingParagraph(
   sectionTitle: string,
   round: number,
 ): string {
+  if (sectionNumber === 2) {
+    const angleVariants = [
+      "오행이 강한 부분은 역할과 추진에, 약한 부분은 회복과 정리에 쓰일 때 균형이 잡히기 쉽습니다.",
+      "음양 비율이 한쪽으로 치우치면 속도를 조금 낮추고 회복 슬롯을 먼저 확보하는 편이 좋습니다.",
+    ];
+    const riskVariants = [
+      "큰 결정은 컨디션이 안정된 날로 미루어 보시면 시행착오를 줄일 수 있습니다.",
+      "한 주에 바꿀 습관은 한 가지씩만 정해 반복해 보시면 체감이 분명해집니다.",
+    ];
+    const lines = [
+      `${input.name}님은 사주 원국의 오행과 음양을 생활 리듬과 연결해 읽어보세요. ${angleVariants[round % angleVariants.length]}`,
+      `${input.name}님은 이 장의 해석을 일상에서 작은 행동으로 검증해 보시면 좋습니다. ${riskVariants[round % riskVariants.length]}`,
+    ];
+    return lines[round % lines.length];
+  }
+
   const angleVariants = [
     "최근 3개월의 반복 장면을 먼저 기록해두세요.",
     "일·관계·건강 중 체감 변화가 큰 한 영역부터 실행해보세요.",
@@ -1456,21 +2173,135 @@ export function buildFallbackSection(input: LlmGenerateInput, sectionNumber: num
       ].join("\n\n");
       break;
     case 2:
+      const order = ["목", "화", "토", "금", "수"] as const;
+      type ElementKey = (typeof order)[number];
+      const elementHanja: Record<ElementKey, string> = { 목: "木", 화: "火", 토: "土", 금: "金", 수: "水" };
+      const elementKor: Record<ElementKey, string> = { 목: "나무", 화: "불", 토: "흙", 금: "금", 수: "물" };
+      const compositionText = (() => {
+        if (!ext) {
+          return `${input.name}님의 오행 분포는 일상에서 어떤 기운이 강하고 약한지 확인하는 기준이 됩니다.`;
+        }
+        const sorted = [...order].sort((a, b) => {
+          const diff = ext.elementPcts[b] - ext.elementPcts[a];
+          return diff !== 0 ? diff : ext.elementCounts[b] - ext.elementCounts[a];
+        });
+        const strongest = sorted[0];
+        const weakest = [...sorted].reverse()[0];
+        const weakestZero = ext.elementCounts[weakest] === 0;
+        const weakestNote = weakestZero
+          ? `${elementKor[weakest]}(${weakest}${elementHanja[weakest]})의 부재에 가까운 분포라 추진력·전환력·회복력 중 일부가 체감상 부족하게 느껴질 수 있습니다.`
+          : `${elementKor[weakest]}(${weakest}${elementHanja[weakest]}) 비중이 낮아 특정 상황에서 균형이 한쪽으로 기울 수 있으니 생활 루틴으로 보완하는 전략이 필요합니다.`;
+        return `${input.name}님의 오행분포는 목(木) ${ext.elementPcts.목}% - ${ext.elementCounts.목}개, 화(火) ${ext.elementPcts.화}% - ${ext.elementCounts.화}개, 토(土) ${ext.elementPcts.토}% - ${ext.elementCounts.토}개, 금(金) ${ext.elementPcts.금}% - ${ext.elementCounts.금}개, 수(水) ${ext.elementPcts.수}% - ${ext.elementCounts.수}개입니다. 음양오행(陰陽五行)의 관점에서 볼 때 ${elementKor[strongest]}(${strongest}${elementHanja[strongest]}) 기운이 가장 강하게 작용하며, 이는 ${input.name}님의 기본 성향과 의사결정 패턴에 크게 영향을 줄 가능성이 있습니다. 반면 ${weakestNote} 또한 상생(相生)과 상극(相克)의 관점에서 강한 기운만 키우기보다 약한 기운이 기능하도록 생활 환경을 조절하는 것이 중요합니다. 예를 들어 일정 운영, 수면·활동 리듬, 대인관계 속도 조절을 통해 기운의 과열과 정체를 완화하면 전체 흐름의 안정감이 더 높아질 수 있습니다.`;
+      })();
       body = [
         `${input.name}님, 먼저 음양은 모든 존재와 현상이 서로 다른 두 성질 사이의 균형으로 움직인다는 원리입니다. 음은 안으로 모으고 가라앉히는 힘, 양은 밖으로 드러내고 확장시키는 힘으로 이해하시면 좋아요.`,
         "오행은 목화토금수의 다섯 기운으로, 사람의 성향과 반응 패턴을 보다 구체적으로 읽기 위한 기준입니다. 중요한 것은 어느 하나가 무조건 좋거나 나쁘다는 것이 아니라, 어떤 기운이 강하고 어떤 기운이 비어 있는지에 따라 생활 방식이 달라진다는 점입니다.",
         "또한 오행은 상생과 상극의 원리로 이어집니다. 서로 도와 성장을 만드는 흐름도 있고, 과한 치우침을 제어하는 흐름도 있기 때문에, 이 관계를 함께 봐야 실제 생활과 연결된 해석이 가능합니다.",
-        named(`${input.name}님의 음양오행 구성`, ext ? `${input.name}님의 오행 분포는 목 ${ext.elementPcts.목}%(${ext.elementCounts.목}개), 화 ${ext.elementPcts.화}%(${ext.elementCounts.화}개), 토 ${ext.elementPcts.토}%(${ext.elementCounts.토}개), 금 ${ext.elementPcts.금}%(${ext.elementCounts.금}개), 수 ${ext.elementPcts.수}%(${ext.elementCounts.수}개)입니다. 강한 기운은 생활의 기본 성향으로, 약한 기운은 보완 포인트로 작용할 가능성이 있습니다.` : `${input.name}님의 오행 분포는 일상에서 어떤 기운이 강하고 약한지 확인하는 기준이 됩니다.`),
-        named(`${input.name}님의 음양에 대한 설명`, ext ? `${input.name}님의 사주는 양 ${ext.yinYangPct.yang}%, 음 ${ext.yinYangPct.yin}%의 비율로 나타납니다. 이 비율은 외부로 에너지를 발산하는 방식과 내면에서 판단을 정리하는 방식 사이의 균형을 보여줍니다.` : `${input.name}님의 음양 비율은 행동 속도와 관계 반응의 결을 읽는 데 도움이 됩니다.`),
-        named(`${input.name}님의 일주에 대한 설명`, `${input.name}님의 일주는 ${dayPillar}입니다. 일주는 사주 전체에서 성격의 중심축처럼 작동하기 때문에, 이후 장들의 해석도 이 기준과 함께 읽을수록 더 선명해집니다.`),
-        "종합적으로 보면 이 장은 단순히 오행 개수를 세는 장이 아니라, 어떤 기운이 나를 밀어주고 어떤 기운이 생활에서 자꾸 보완을 요구하는지를 확인하는 장입니다.",
+        named(`${input.name}님의 음양오행 구성`, compositionText),
+        named(
+          `${input.name}님의 음양에 대한 설명`,
+          ext
+            ? (() => {
+                const { yin, yang } = ext.yinYangPct;
+                const yinDom = yin >= yang;
+                const open = `${input.name}님의 사주는 음양(陰陽)의 균형 면에서 음(陰)이 ${yin}%, 양(陽)이 ${yang}%를 차지합니다. `;
+                const mid = yinDom
+                  ? yin >= 60
+                    ? "이는 음(陰)의 비중이 상대적으로 큰 편이라 내향성·차분함·내면 정리 쪽으로 에너지가 기울기 쉬운 구성으로 읽을 수 있습니다. "
+                    : "음(陰) 쪽 성향이 조금 더 도드라질 수 있는 구성으로 읽을 수 있습니다. "
+                  : yang >= 60
+                    ? "이는 양(陽)의 비중이 상대적으로 큰 편이라 발산·주도·외부 활동 쪽으로 에너지가 기울기 쉬운 구성으로 읽을 수 있습니다. "
+                    : "양(陽) 쪽 성향이 조금 더 도드라질 수 있는 구성으로 읽을 수 있습니다. ";
+                const tail = yinDom && yang <= 35
+                  ? "다만 양(陽)이 충분히 받쳐주지 못하면 관계나 표현에서 적극성이 더딜 수 있으니, 작은 대화 루틴과 가벼운 외부 활동을 의도적으로 넣어 균형을 맞추는 편이 좋습니다."
+                  : !yinDom && yin <= 35
+                    ? "다만 음(陰)이 충분히 받쳐주지 못하면 회복·정리·내적 안정이 흔들릴 수 있으니 휴식과 감정 정리 시간을 고정하는 편이 좋습니다."
+                    : "두 기운을 생활 리듬 속에서 함께 점검해 가시면 해석이 더 현실에 가깝게 맞아떨어집니다.";
+                return open + mid + tail;
+              })()
+            : `${input.name}님의 음양 비율은 행동 속도와 관계 반응의 결을 읽는 데 도움이 됩니다.`,
+        ),
+        named(
+          `${input.name}님의 일주에 대한 설명`,
+          ext
+            ? (() => {
+                const d = ext.pillars[1];
+                const stemLine = `${d.stemHanja}(${d.stemKorean})은 ${formatYinyangElementKoHanja(d.stemYinYang, d.stemElement)} 성격으로 일간의 기본 결을 드러내기 쉽습니다.`;
+                const branchLine = `${d.branchHanja}(${d.branchKorean})은 ${formatYinyangElementKoHanja(d.branchYinYang, d.branchElement)} 성격으로 정서와 환경 반응의 결을 보여줄 수 있습니다.`;
+                const elLabel = (k: ElementKey) =>
+                  k === "목"
+                    ? "나무(木)"
+                    : k === "화"
+                      ? "불(火)"
+                      : k === "토"
+                        ? "흙(土)"
+                        : k === "금"
+                          ? "금(金)"
+                          : "물(水)";
+                const weakBits: string[] = [];
+                order.forEach((k) => {
+                  if (ext.elementCounts[k] === 0) weakBits.push(`${elLabel(k)}의 부재 또는 극히 약한 흐름`);
+                  else if (ext.elementPcts[k] <= 15 && ext.elementCounts[k] > 0) {
+                    weakBits.push(`${elLabel(k)}의 약한 비중`);
+                  }
+                });
+                const weakTail =
+                  weakBits.length > 0
+                    ? ` 오행 구성을 함께 보면 ${weakBits.slice(0, 2).join(", ")}은 생활에서 에너지 순환이나 추진·발산 면에서 부담으로 느껴질 수 있으니, 의도적인 보완 루틴이 도움이 됩니다.`
+                    : " 오행 구성과 맞추어 읽으면 강한 기운은 추진에, 약한 기운은 회복과 정리에 쓰일 때 전체 균형이 잡히기 쉽습니다.";
+                return `${input.name}님의 일주는 ${dayPillar}(${d.stemHanja}${d.branchHanja})입니다. ${stemLine} ${branchLine} ${dayPillar} 일주는 두 기운이 만나 만들어 내는 생활 태도와 선택 습관으로 이어질 수 있습니다.${weakTail}`;
+              })()
+            : `${input.name}님의 일주는 ${dayPillar}입니다. 일주는 사주 전체에서 성격의 중심축처럼 작동하기 때문에, 이후 장들의 해석도 이 기준과 함께 읽을수록 더 선명해집니다.`,
+        ),
+        ext
+          ? (() => {
+              const sorted = [...order].sort((a, b) => {
+                const diff = ext.elementPcts[b] - ext.elementPcts[a];
+                return diff !== 0 ? diff : ext.elementCounts[b] - ext.elementCounts[a];
+              });
+              const s = sorted[0];
+              const w = [...sorted].reverse()[0];
+              return `종합적으로, ${input.name}님의 음양오행은 음(陰) ${ext.yinYangPct.yin}%·양(陽) ${ext.yinYangPct.yang}%의 비율과 함께 ${elementKor[s]}(${s}${elementHanja[s]}) 기운이 두드러지는 흐름입니다. 반면 ${elementKor[w]}(${w}${elementHanja[w]})는 상대적으로 약해 보완이 필요할 수 있어, 외적 활동·추진·회복 사이에서 균형을 의도적으로 맞추면 한결 편안한 리듬을 만들기 쉽습니다.`;
+            })()
+          : "종합적으로 보면 이 장은 단순히 오행 개수를 세는 장이 아니라, 어떤 기운이 나를 밀어주고 어떤 기운이 생활에서 자꾸 보완을 요구하는지를 확인하는 장입니다.",
       ].join("\n\n");
       break;
-    case 3:
+    case 3: {
+      const stemFlavor: Record<string, string> = {
+        목: "성장과 확장의 리듬",
+        화: "표현과 열기의 리듬",
+        토: "중심과 균형을 잡으려는 힘",
+        금: "기준과 단단함",
+        수: "유연함과 흡수력",
+      };
+      const branchFlavor: Record<string, string> = {
+        목: "새로움이나 성장 방향으로 마음이 기울 수 있으며",
+        화: "감정의 온도가 비교적 분명하게 드러날 수 있으며",
+        토: "안정과 루틴을 중시하는 경향이 강해질 수 있으며",
+        금: "정리와 마무리에 힘이 실리기 쉬우며",
+        수: "깊이와 적응이 강조되기 쉬우며",
+      };
+      const d = ext?.pillars[1];
+      const dayStem = d?.stemKorean ?? dayPillar.at(0) ?? "";
+      const dayBranch = d?.branchKorean ?? dayPillar.at(1) ?? "";
+      const ilganIntro =
+        d
+          ? `${dayPillar}(${d.stemHanja}${d.branchHanja}) 일주는 천간이 ${d.stemHanja}(${d.stemKorean})인 구조로, 일간에는 ${formatYinyangElementKoHanja(d.stemYinYang, d.stemElement)}의 기질이 성격의 뼈대로 작용하기 쉽습니다. ${stemFlavor[d.stemElement] ?? "기본 기질"}이 의사결정과 역할 수행 방식에 스며들 가능성이 큽니다.`
+          : `${dayPillar} 일주에서 일간 ${dayStem}의 기질이 성격의 뼈대로 작용하기 쉽습니다.`;
+      const iljiIntro =
+        d
+          ? `일지는 ${d.branchHanja}(${d.branchKorean})에 해당하며, ${formatYinyangElementKoHanja(d.branchYinYang, d.branchElement)}의 성격이 감정과 가까운 관계 반응에 영향을 주기 쉽습니다. ${branchFlavor[d.branchElement] ?? "정서 반응이 두드러질 수 있으며"}, 이는 일상의 관계 맥락과 스트레스 반응에 연결되어 읽을 수 있습니다.`
+          : `일지 ${dayBranch}는 감정이 머무는 방식과 가까운 관계에서의 반응을 보여주기 쉽습니다.`;
+      const summary =
+        d
+          ? `일간과 일지를 기준으로 한 종합적인 성격분석\n${dayPillar}(${d.stemHanja}${d.branchHanja}) 일주는 ${formatYinyangElementKoHanja(d.stemYinYang, d.stemElement)}의 추진·기준과 ${formatYinyangElementKoHanja(d.branchYinYang, d.branchElement)}의 정서·환경 반응이 함께 얽힌 구조로 읽을 수 있습니다. ${input.name}님은 겉으로 드러나는 역할감과 안으로 쌓이는 감정 사이에서 속도를 조절할수록 피로는 줄고 선택의 명확성은 높아질 수 있습니다. 대인관계에서는 냉정함으로 오해받지 않도록 감정의 온도를 가끔은 말로 명확히 전달하는 연습이 관계 만족에 도움이 됩니다.\n\n${input.name}님의 성격은 한 가지 단어로 정리되기보다 일간의 기준감과 일지의 정서 반응이 함께 작용하면서 상황마다 다른 결로 드러날 가능성이 큽니다. 그래서 ${dayPillar} 일주의 장점은 밀고, 피로가 쌓이는 반응은 조절하는 방식으로 읽으시는 편이 훨씬 현실적입니다.`
+          : `일간과 일지를 기준으로 한 종합적인 성격분석\n${input.name}님은 겉으로는 기준감이 있고 안으로는 감정의 결이 섬세한 흐름으로 읽을 수 있습니다. 그래서 자신만의 기준을 지키면서도, 감정 피로를 덜 쌓는 방향으로 속도를 조절하는 것이 중요합니다.`;
       body = [
         `${input.name}님, ${dayPillar} 일주에 대한 성격을 분석해드리겠습니다.`,
         [
           "일간을 기준으로 한 성격 분석",
+          "",
+          ilganIntro,
           "",
           "강한 결단력",
           "특징 : 일간은 스스로 기준을 세우는 방식과 결단의 리듬을 보여줍니다.",
@@ -1495,6 +2326,8 @@ export function buildFallbackSection(input: LlmGenerateInput, sectionNumber: num
         [
           "일지를 기준으로 한 성격 분석",
           "",
+          iljiIntro,
+          "",
           "유연한 사고방식",
           "특징 : 일지는 감정이 머무는 방식과 가까운 관계에서의 반응을 보여줍니다.",
           "영향 : 겉으로 차분해 보여도 안에서는 오래 고민하는 패턴으로 이어질 수 있습니다.",
@@ -1515,122 +2348,597 @@ export function buildFallbackSection(input: LlmGenerateInput, sectionNumber: num
           "특징 : 정서적 안전지대를 중요하게 생각합니다.",
           "영향 : 믿는 사람에게는 깊이 연결되지만 불편한 관계와는 거리를 크게 둘 수 있습니다.",
         ].join("\n"),
-        `일간과 일지를 기준으로 한 종합적인 성격분석\n${input.name}님은 겉으로는 기준감이 있고 안으로는 감정의 결이 섬세한 흐름으로 읽을 수 있습니다. 그래서 자신만의 기준을 지키면서도, 감정 피로를 덜 쌓는 방향으로 속도를 조절하는 것이 중요합니다.`,
+        summary,
       ].join("\n\n");
-      break;
-    case 4:
-      body = `${input.name}님, 먼저 초년기를 의미하는 연주부터 풀이해드리겠습니다.\n연주는 어린 시절의 환경과 초반 사회화 과정에서 형성된 태도를 읽는 데 도움이 됩니다.\n\n다음으로 청년기를 의미하는 월주를 풀이해드리겠습니다.\n월주는 사회생활과 역할 수행, 현실 감각이 가장 강하게 드러나는 자리이므로 직업과 인간관계에서 자주 체감되는 패턴으로 이어질 가능성이 큽니다.\n\n다음으로 중년기를 의미하는 일주를 풀이해드리겠습니다.\n일주는 자기 자신과 가까운 관계의 의미를 함께 지니므로, 실제 성격의 중심과 반복 반응을 읽는 핵심 기준이 됩니다.\n\n마지막으로 말년기를 의미하는 시주를 풀이해드리겠습니다.\n시주는 시간이 갈수록 더 선명해지는 가치관과 인생 후반의 정리 방식을 보여주기 때문에, 장기 계획과 후반부 인간관계를 볼 때 중요합니다.\n\n종합적으로 보면 이 사주의 십성 흐름은 시기마다 강조되는 역할이 조금씩 다르게 나타날 가능성이 있습니다. 결국 중요한 것은 강한 기운을 무조건 밀어붙이는 것이 아니라, 시기마다 필요한 역할을 어떻게 조절하느냐에 있습니다.`;
-      break;
-    case 5:
-      body = `${input.name}님, 이 사주의 십이운성을 보면 각각의 운성이 삶의 시기마다 다른 리듬을 만들어내고 있습니다.\n\n먼저 초년기를 의미하는 연주부터 보겠습니다.\n연주의 십이운성은 어린 시절의 에너지 표현 방식과 초반 환경 적응력을 보여줍니다.\n\n다음으로 청년기를 의미하는 월주를 풀이해드리겠습니다.\n월주의 십이운성은 사회적 역할, 직업 감각, 현실에서 부딪히는 시행착오와 연결되기 쉽습니다.\n\n다음으로 중년기를 의미하는 일주를 풀이해드리겠습니다.\n일주의 십이운성은 자기 중심과 관계 피로, 삶의 방향을 다시 정리하는 전환점으로 읽히는 경우가 많습니다.\n\n마지막으로 말년기를 의미하는 시주를 풀이해드리겠습니다.\n시주의 십이운성은 후반부의 마무리, 정신적 안정, 인생의 결실과 관련해 해석할 수 있습니다.\n\n종합적으로 보면 이 장은 한 번에 강약을 판정하는 장이 아니라, 어느 시기에 에너지가 올라오고 어느 시기에 속도 조절이 필요한지를 읽는 장입니다.`;
-      break;
-    case 6: {
-      const gwinByPillar = ext
-        ? {
-            year: ext.pillars[3].gwin.length ? ext.pillars[3].gwin.join(", ") : "해당없음",
-            month: ext.pillars[2].gwin.length ? ext.pillars[2].gwin.join(", ") : "해당없음",
-            day: ext.pillars[1].gwin.length ? ext.pillars[1].gwin.join(", ") : "해당없음",
-            hour: ext.pillars[0].gwin.length ? ext.pillars[0].gwin.join(", ") : "해당없음",
-          }
-        : { year: "해당없음", month: "해당없음", day: "해당없음", hour: "해당없음" };
-      body = `${input.name}님, 이 사주를 보면 십이신살과 귀인의 조합이 삶의 장면마다 다른 방식으로 작용할 가능성이 있습니다.\n\n십이신살에 대해 먼저 풀이해보겠습니다!\n먼저 초년기를 의미하는 연주부터 분석해보겠습니다.\n연주는 초반 환경에서 어떤 인연과 긴장감을 먼저 배우게 되는지 읽는 데 도움이 됩니다.\n\n다음으로 청년기를 의미하는 월주를 알아보겠습니다.\n월주는 사회 진입기나 직업 환경에서 반복되는 변화와 이동, 관계의 강약으로 체감될 수 있습니다.\n\n다음으로 중년기를 의미하는 일주를 보겠습니다.\n일주는 가까운 인간관계와 자기 감정선이 만나는 자리라 실제 생활 피로와 맞닿는 경우가 많습니다.\n\n말년기를 의미하는 시주를 보겠습니다.\n시주는 후반부의 관심사, 내면 성찰, 인간관계 정리 방식과 연결해서 읽어볼 수 있습니다.\n\n이제 귀인에 대해서 알아볼까요?\n연주의 귀인은 ${gwinByPillar.year}, 월주의 귀인은 ${gwinByPillar.month}, 일주의 귀인은 ${gwinByPillar.day}, 시주의 귀인은 ${gwinByPillar.hour}입니다.\n귀인은 어려운 순간에 누구의 도움을 받기 쉬운지, 혹은 어떤 환경에서 숨통이 트이는지를 보여주는 보조 지표입니다.\n\n종합적으로 보면 이 사주는 신살이 주는 사건성만 볼 것이 아니라, 귀인이 그 흐름을 어떻게 완충해 주는지까지 같이 읽어야 합니다.`;
       break;
     }
-    case 7:
-      body = [
-        named("연애운 풀이", `${input.name}님의 연애운은 감정의 깊이와 관계의 속도 조절을 함께 봐야 하는 흐름입니다. 감정이 생겼을 때 빠르게 확신을 만들기보다, 상대와의 대화 빈도·약속 이행·갈등 해결 방식이 안정적인지 시간을 두고 확인할수록 만족도가 높아질 가능성이 큽니다.`),
-        named("일간 성격과 연애 성향", `${input.name}님은 신뢰가 쌓일수록 관계에 깊게 들어가는 편일 가능성이 있습니다. 다만 마음이 커질수록 기대치도 함께 올라갈 수 있으니, 원하는 관계 방식과 불편한 지점을 초반부터 구체적으로 공유하면 관계 피로를 줄이는 데 도움이 됩니다.`),
-        named("연애에서 나타나는 장단점", "장점은 진지함과 책임감으로 관계의 안정감을 만들 수 있다는 점입니다. 반면 단점은 기준이 높아지면서 실망도 커질 수 있다는 부분이므로, 상대의 표현 방식이 나와 다를 수 있다는 전제를 두고 대화를 이어가는 태도가 필요합니다."),
-        named("연애 시기와 방법", "관계가 급하게 진전되기보다 일상 속 대화와 신뢰를 통해 깊어지는 방식이 더 잘 맞을 수 있습니다. 특히 바쁜 시기일수록 짧더라도 규칙적인 연락 리듬을 유지하면 오해를 줄이고 관계의 안정성을 높일 수 있습니다."),
-        named("살과 귀인의 영향", "신살의 작용이 강한 시기에는 관계의 기복이 커질 수 있고, 귀인의 흐름이 좋을 때는 좋은 인연이 들어올 가능성이 있습니다. 이 시기에는 감정 반응을 즉시 결론으로 연결하지 말고, 최소 하루 간격으로 생각을 정리한 뒤 대화하는 방식이 도움이 됩니다."),
-        named("성공적인 연애를 위한 조언", "서운함이 쌓이기 전에 작은 단위로 말하는 습관이 중요합니다. '무엇이 불편했는지-왜 힘들었는지-앞으로 어떻게 맞출지' 순서로 전달하면 감정 소모를 줄이면서도 관계를 실제로 개선할 수 있습니다."),
-        named("나의 결혼운", "결혼운은 감정보다 생활 리듬과 책임 분담이 맞는 사람과 안정적으로 이어질 가능성이 큽니다. 결혼을 고려할수록 가치관보다도 생활 운영 방식(시간, 돈, 가족, 휴식)에 대한 합의가 중요한 판단 기준이 됩니다."),
-        named("이상적인 배우자상과 피해야할 배우자상", "이상적인 배우자는 감정 표현이 안정적이고 약속을 가볍게 넘기지 않는 사람입니다. 반대로 중요한 문제를 회피하거나 감정 기복이 큰 상황에서 대화를 끊어버리는 유형은 장기적으로 피로를 키울 수 있으니 주의가 필요합니다."),
-        named("배우자와의 관계 전망", "서로 기준을 존중하고 대화 속도를 맞춘다면 오래 갈 가능성이 있습니다. 갈등이 생겼을 때 승부를 보려는 태도보다 문제를 구조적으로 나눠 해결하는 태도를 유지하면, 관계 만족도와 신뢰가 함께 높아질 수 있습니다."),
-        named("연애에서 피해야 할 점", "마음속 결론을 먼저 내리고 상대를 시험하듯 보는 태도는 피하시는 편이 좋습니다. 확인되지 않은 추측을 사실처럼 다루면 관계가 빠르게 소모될 수 있으니, 감정이 커질수록 사실 확인과 질문 중심 대화로 방향을 잡으세요."),
-        named("종합분석", `${input.name}님의 연애와 결혼운은 진심의 깊이는 충분하지만 표현 방식과 타이밍에 따라 체감 차이가 크게 나타날 수 있습니다. 핵심은 감정의 크기보다 관계 운영 방식이며, 대화 루틴과 기대 조율을 함께 가져갈수록 안정적인 흐름을 만들 가능성이 큽니다.`),
-      ].join("\n\n");
+    case 4: {
+      const sipStemPara = (stemLabel: string, sip: string, stage: string) =>
+        `${stemLabel}의 ${sip}은 일간을 기준으로 볼 때 ${stage}에 드러나는 십성 역할의 한 축입니다. ${sip}의 성격은 표현 방식, 과제에 대한 태도, 관계에서의 거리감과 연결해 풀 수 있으며, 해당 시기에는 반복되는 선택 습관이나 감정 반응과 함께 읽는 편이 생활과 잘 맞아떨어집니다. 기운이 강조될 때는 그 방향으로 추진력이 실리는 장점이 있으나, 한쪽으로 과하게 기울면 피로나 긴장으로 번질 수 있으니 주변과의 균형, 대화, 속도 조절을 함께 염두에 두면 부담을 줄일 수 있습니다.`;
+      const sipBranchPara = (branchLabel: string, sip: string, stage: string) =>
+        `${branchLabel}의 ${sip}은 같은 기둥의 천간 역할과 맞물려 ${stage}의 관계·환경·협력과 경쟁의 층위를 보여주는 지표로 읽을 수 있습니다. ${sip}이 부각될 때는 그 성격이 관계 장면에서 반복 체감되기 쉬우며, 자신의 위치를 확인하거나 비교의 감각이 함께 올라올 수 있습니다. 다만 지나치게 한쪽으로 몰리면 갈등이나 피로가 쌓일 수 있으니, 혼자 버티기보다 기대치를 조정하거나 환경을 완충하는 전략이 도움이 됩니다.`;
+      if (ext) {
+        const [pHour, pDay, pMonth, pYear] = [ext.pillars[0], ext.pillars[1], ext.pillars[2], ext.pillars[3]];
+        const yKr = input.saju.fourPillarsKorean.year;
+        const mKr = input.saju.fourPillarsKorean.month;
+        const dKr = input.saju.fourPillarsKorean.day;
+        const hKr = input.saju.fourPillarsKorean.hour;
+        body = [
+          `${input.name}님, 먼저 초년기를 의미하는 연주부터 풀이해드리겠습니다.`,
+          "연주는 어린 시절의 환경과 초반 사회화 과정에서 형성된 태도를 읽는 데 도움이 됩니다.",
+          `연간 십성은 ${pYear.sipseongStem}이고, 연지 십성은 ${pYear.sipseongBranch}입니다.`,
+          sipStemPara("연간", pYear.sipseongStem, "초년기"),
+          sipBranchPara("연지", pYear.sipseongBranch, "초년기"),
+          "다음으로, 청년기를 의미하는 월주를 풀이해드리겠습니다.",
+          "월주는 사회생활과 역할 수행, 현실 감각이 가장 강하게 드러나는 자리이므로 직업과 인간관계에서 자주 체감되는 패턴으로 이어질 가능성이 큽니다.",
+          `월간 십성은 ${pMonth.sipseongStem}이고, 월지 십성은 ${pMonth.sipseongBranch}입니다.`,
+          sipStemPara("월간", pMonth.sipseongStem, "청년기"),
+          sipBranchPara("월지", pMonth.sipseongBranch, "청년기"),
+          "다음으로, 중년기를 의미하는 일주를 풀이해드리겠습니다.",
+          "일주는 자기 자신과 가까운 관계의 의미를 함께 지니므로, 실제 성격의 중심과 반복 반응을 읽는 핵심 기준이 됩니다.",
+          `일간 십성은 ${pDay.sipseongStem}이고, 일지 십성은 ${pDay.sipseongBranch}입니다.`,
+          sipStemPara("일간", pDay.sipseongStem, "중년기"),
+          sipBranchPara("일지", pDay.sipseongBranch, "중년기"),
+          "마지막으로, 말년기를 의미하는 시주를 풀이해드리겠습니다.",
+          "시주는 시간이 갈수록 더 선명해지는 가치관과 인생 후반의 정리 방식을 보여주기 때문에, 장기 계획과 후반부 인간관계를 볼 때 중요합니다.",
+          `시간 십성은 ${pHour.sipseongStem}이고, 시지 십성은 ${pHour.sipseongBranch}입니다.`,
+          sipStemPara("시간", pHour.sipseongStem, "말년기"),
+          sipBranchPara("시지", pHour.sipseongBranch, "말년기"),
+          "종합적으로, 이 사주는 네 기둥마다 십성이 맡는 역할이 시기에 따라 조금씩 달라 보일 수 있습니다. 초년·청년·중년·말년으로 나누어 보면, 각각 환경 적응, 사회적 역할, 자기 중심의 반응, 후반부의 가치 정리 쪽으로 에너지가 번갈아 강조될 여지가 있으니 한 번에 단정하기보다 흐름으로 읽는 편이 좋습니다.",
+          `${input.name}님은 십성을 좋고 나쁨으로만 나누기보다, 지금 시기에 어떤 역할이 과하게 실리고 어디를 완충해야 하는지를 먼저 보시면 적용이 쉬워집니다. 특히 ${dKr} 일주 기준으로 연주 ${yKr}·월주 ${mKr}·일주 ${dKr}·시주 ${hKr}의 십성 조합을 구분해 보시면 실제 삶의 장면과 더 잘 맞아떨어질 수 있습니다.`,
+        ].join("\n\n");
+      } else {
+        body = `${input.name}님, 먼저 초년기를 의미하는 연주부터 풀이해드리겠습니다.\n연주는 어린 시절의 환경과 초반 사회화 과정에서 형성된 태도를 읽는 데 도움이 됩니다.\n\n다음으로 청년기를 의미하는 월주를 풀이해드리겠습니다.\n월주는 사회생활과 역할 수행, 현실 감각이 가장 강하게 드러나는 자리이므로 직업과 인간관계에서 자주 체감되는 패턴으로 이어질 가능성이 큽니다.\n\n다음으로 중년기를 의미하는 일주를 풀이해드리겠습니다.\n일주는 자기 자신과 가까운 관계의 의미를 함께 지니므로, 실제 성격의 중심과 반복 반응을 읽는 핵심 기준이 됩니다.\n\n마지막으로 말년기를 의미하는 시주를 풀이해드리겠습니다.\n시주는 시간이 갈수록 더 선명해지는 가치관과 인생 후반의 정리 방식을 보여주기 때문에, 장기 계획과 후반부 인간관계를 볼 때 중요합니다.\n\n종합적으로 보면 이 사주의 십성 흐름은 시기마다 강조되는 역할이 조금씩 다르게 나타날 가능성이 있습니다. 결국 중요한 것은 강한 기운을 무조건 밀어붙이는 것이 아니라, 시기마다 필요한 역할을 어떻게 조절하느냐에 있습니다.`;
+      }
       break;
-    case 8:
-      body = [
-        named("재물운 풀이", `${input.name}님의 재물운은 한 번의 기회보다 관리 습관과 선택의 속도에서 차이가 벌어질 가능성이 있습니다. 큰 수입이 들어오는 순간보다, 그 수입을 지키고 다시 불릴 구조를 얼마나 일찍 만들었는지가 장기 성과를 좌우할 수 있습니다.`),
-        named("일간 성격과 재물운", "기준과 계획을 중시하는 태도는 재물 관리에서 강점이 될 수 있습니다. 다만 계획이 세밀할수록 실행이 늦어질 수 있으니, 월 단위 점검표처럼 간단한 운영 도구를 먼저 고정하고 점차 정교화하는 방식이 효율적입니다."),
-        named("시간에 따른 재물운의 흐름", "초년은 기반, 청년은 탐색, 중년은 축적과 확장, 말년은 안정과 보전의 흐름으로 읽는 방식이 현실적입니다. 각 시기마다 목표가 달라야 하며, 특히 중년기에는 수입 다변화와 리스크 분산을 함께 설계해야 변동성에 흔들리지 않을 수 있습니다."),
-        named("재물운이 크게 들어오는 시기", "수입 자체보다 성과를 구조화할 수 있는 시기가 더 중요하게 작용할 수 있습니다. 운이 들어오는 구간에서는 지출 확대보다 안전자산·현금흐름·고정비 관리 순서로 정리하면 상승 흐름을 더 오래 유지할 수 있습니다."),
-        named("살과 귀인의 영향", "신살은 돈이 들어오고 나가는 사건성을 키울 수 있고, 귀인은 좋은 조언을 받을 통로로 작용할 수 있습니다. 즉, 변동성이 커질 때는 단독 판단보다 검증 가능한 조언 루트를 확보하는 것이 손실을 줄이는 데 실질적으로 도움이 됩니다."),
-        named("주의해야 될 시기", "감정 피로가 큰 시기에는 보상 소비나 조급한 판단이 겹칠 수 있으니 주의가 필요합니다. 이때는 고정 지출부터 재점검하고, 큰 금액의 결정은 최소 24시간 숙려 규칙을 두는 방식이 재정 안전성을 높입니다."),
-        named("어떻게 재물을 모으게 될까?", "반복 가능한 관리 습관과 지출 점검 구조를 먼저 만드는 편이 유리합니다. 월별 저축률보다도 '자동이체-지출 분류-주간 점검'의 3단 구조를 고정하면 재물 축적 속도가 훨씬 안정적으로 올라갈 수 있습니다."),
-        named("성공적인 재물의 축적 방법", "예산 금액만이 아니라 점검 횟수와 소비 패턴을 함께 관리하시는 편이 좋습니다. 특히 지출의 감정 트리거(스트레스, 피로, 비교심리)를 파악하면 불필요한 누수를 줄이고 실질적인 순자산 증가로 연결하기 쉬워집니다."),
-        named("종합분석", `${input.name}님의 재물운은 기회의 크기보다 관리 방식에 따라 체감 차이가 커질 수 있는 구조입니다. 핵심은 운이 좋을 때 확장만 하지 않고 보전 구조를 함께 만들며, 운이 약할 때는 손실 관리와 루틴 유지로 기초 체력을 지키는 데 있습니다.`),
-      ].join("\n\n");
+    }
+    case 5: {
+      const sibiPara = (label: string, unseong: string, stage: string) => {
+        const u = formatSibiunseongKoHanja(unseong);
+        return `${u}는 일간을 기준으로 본 십이운성 흐름에서 ${stage}에 해당하는 ${label}의 에너지 리듬을 보여주는 지표입니다. 이 운성이 상징하는 강약과 전환은 해석에 따라 성취·성장·시행착오·재정비 등으로 풀 수 있으며, 해당 시기에는 반복되는 생활 장면과 감정 반응과 연결해 읽는 편이 현실적입니다. 기운이 강하게 실릴 때는 추진과 주목받는 역할이 붙기 쉽고, 상대적으로 부담이 큰 운성이면 내적 단련·회복·방향 수정의 과제로 읽을 수 있으니 균형과 속도 조절을 함께 염두에 두시면 좋습니다.`;
+      };
+      if (ext) {
+        const pY = ext.pillars[3];
+        const pM = ext.pillars[2];
+        const pD = ext.pillars[1];
+        const pH = ext.pillars[0];
+        const dKr = input.saju.fourPillarsKorean.day;
+        body = [
+          `${input.name}님, 이 사주의 십이운성을 보면, 각각의 운성들이 그 사람의 삶에서 중요한 시기와 흐름을 보여주고 있습니다. 하나씩 살보면서 전체적인 흐름을 설명해드리겠습니다.`,
+          "먼저, 초년기를 의미하는 연주부터 풀이해드리겠습니다.",
+          `연주 지지에 따른 십이운성은 ${formatSibiunseongKoHanja(pY.sibiunseong)}입니다.`,
+          sibiPara("연주", pY.sibiunseong, "초년기"),
+          "다음으로, 청년기를 의미하는 월주를 풀이해드리겠습니다.",
+          `월주 지지에 따른 십이운성은 ${formatSibiunseongKoHanja(pM.sibiunseong)}입니다.`,
+          sibiPara("월주", pM.sibiunseong, "청년기"),
+          "다음으로, 중년기를 의미하는 일주를 풀이해드리겠습니다.",
+          `일주 지지에 따른 십이운성은 ${formatSibiunseongKoHanja(pD.sibiunseong)}입니다.`,
+          sibiPara("일주", pD.sibiunseong, "중년기"),
+          "마지막으로, 말년기를 의미하는 시주를 풀이해드리겠습니다.",
+          `시주 지지에 따른 십이운성은 ${formatSibiunseongKoHanja(pH.sibiunseong)}입니다.`,
+          sibiPara("시주", pH.sibiunseong, "말년기"),
+          "종합적으로, 이 사주는 네 기둥의 십이운성이 초년·청년·중년·말년으로 이어지는 리듬 속에서 각기 다른 에너지 강약과 전환을 보여 줄 수 있습니다. 한 번에 좋고 나쁨을 판정하기보다, 어느 시기에 밀고 어느 시기에 정비할지의 흐름으로 읽으면 생활 적용이 훨씬 수월합니다.",
+          `${input.name}님은 십이운성을 결과표처럼 보기보다 에너지가 오르는 구간과 쉬어야 하는 구간을 읽는 리듬표처럼 이해하시면 활용도가 높아집니다. ${dKr} 일주를 중심으로 삶의 속도를 조절하시면 강한 시기에는 밀고, 부담이 큰 시기에는 정비하는 전략을 세우기 쉬워집니다.`,
+        ].join("\n\n");
+      } else {
+        body = `${input.name}님, 이 사주의 십이운성을 보면 각각의 운성이 삶의 시기마다 다른 리듬을 만들어내고 있습니다.\n\n먼저 초년기를 의미하는 연주부터 보겠습니다.\n연주의 십이운성은 어린 시절의 에너지 표현 방식과 초반 환경 적응력을 보여줍니다.\n\n다음으로 청년기를 의미하는 월주를 풀이해드리겠습니다.\n월주의 십이운성은 사회적 역할, 직업 감각, 현실에서 부딪히는 시행착오와 연결되기 쉽습니다.\n\n다음으로 중년기를 의미하는 일주를 풀이해드리겠습니다.\n일주의 십이운성은 자기 중심과 관계 피로, 삶의 방향을 다시 정리하는 전환점으로 읽히는 경우가 많습니다.\n\n마지막으로 말년기를 의미하는 시주를 풀이해드리겠습니다.\n시주의 십이운성은 후반부의 마무리, 정신적 안정, 인생의 결실과 관련해 해석할 수 있습니다.\n\n종합적으로 보면 이 장은 한 번에 강약을 판정하는 장이 아니라, 어느 시기에 에너지가 올라오고 어느 시기에 속도 조절이 필요한지를 읽는 장입니다.`;
+      }
       break;
-    case 9:
-      body = [
-        named("직업운 풀이", `${input.name}님의 직업운은 능력을 어디에 쓰느냐 못지않게, 어떤 방식으로 역할을 맡고 유지하느냐가 중요할 수 있습니다. 업무 성과는 단기 폭발력보다 역할의 지속 가능성에서 갈릴 가능성이 크므로, 본인의 강점을 반복 가능한 구조로 만드는 것이 핵심입니다.`),
-        named("나의 일간 성격에 맞는 직업, 직무", "성향과 리듬이 맞는 구조를 먼저 보는 편이 좋습니다. 즉흥 대응이 많은 환경보다 기준을 세우고 개선해 나갈 수 있는 직무에서 강점이 오래 유지되며, 문제 해결형 업무에서 만족도와 성과가 함께 올라갈 가능성이 큽니다."),
-        named("나의 직장운", "직장운은 조직 안에서 신뢰를 쌓는 흐름과 연결되기 쉽습니다. 상사·동료와의 커뮤니케이션에서 '결론-근거-요청사항' 구조를 유지하면 불필요한 오해를 줄이고, 책임 있는 역할로 빠르게 확장될 가능성이 있습니다."),
-        named("나의 사업운", "독립성과 실행력이 살아날 때 강점이 드러날 수 있지만, 속도가 너무 빨라지면 리스크도 커질 수 있습니다. 사업 흐름에서는 매출보다 현금흐름과 재투자 비율을 먼저 관리해야 하며, 파트너십 계약은 조건을 문서화해 분쟁 비용을 줄이는 것이 중요합니다."),
-        named("십이신살과 귀인의 영향", "신살은 직업 변화나 환경 이동의 사건성으로, 귀인은 협업과 이직에서 도움을 받는 통로로 작용할 수 있습니다. 따라서 변동이 커지는 시기에는 혼자 결정하기보다 검증 가능한 조언과 데이터에 기반해 선택하면 시행착오를 줄일 수 있습니다."),
-        named("성공적인 직장생활을 위한 조언", "중요한 대화 전에는 핵심 쟁점을 메모로 정리하고, 감정이 올라온 날에는 즉답보다 간격을 두는 방식이 도움이 됩니다. 또한 주간 단위로 '성과-리스크-다음 행동'을 리뷰하면 직무 안정성과 성장 속도를 동시에 끌어올리기 좋습니다."),
-        named("종합분석", `${input.name}님의 직업운은 역할의 무게를 잘 버틸 수 있는 힘이 있지만, 오래 가려면 속도 조절과 소통 방식이 함께 필요합니다. 결국 커리어 성장은 능력 자체보다 역할 운영 능력에서 완성되므로, 기준을 명확히 하고 협업 품질을 높이는 전략이 가장 유효합니다.`),
-      ].join("\n\n");
+    }
+    case 6: {
+      const sinsalPara = (sal: string, stage: string, pillarKr: string) =>
+        `${sal}은 십이신살 흐름에서 ${stage}에 해당하는 ${pillarKr}의 에너지 패턴을 보여주는 지표로 읽을 수 있습니다. 이 기운이 작용할 때는 생활 장면에서 인연·이동·갈등·내면 탐구 등으로 반복 체감될 여지가 있으며, 단정적인 흉길이라기보다 어디에 힘이 실리고 어디를 조절해야 하는지를 읽는 보조선으로 보시면 좋습니다. 과하게 몰리면 피로나 긴장으로 번질 수 있으니 대화·속도 조절·환경 선택으로 완충하면 실제 적용에 도움이 됩니다.`;
+      const gwinPara = (names: string, stage: string, pillarKr: string) =>
+        `${names}은(는) 귀인 흐름에서 ${stage}의 ${pillarKr}에 스며드는 도움의 통로로 읽을 수 있습니다. 이 기운이 살아날 때는 배움·조언·우연한 연결처럼 체감되기 쉬우며, 어려운 순간에도 숨통이 트이는 장면이나 사람이 나타날 여지를 키울 수 있습니다. 다만 귀인을 맡김으로만 두기보다 스스로의 판단과 준비를 함께 가져가면 훨씬 안정적으로 활용할 수 있습니다.`;
+      if (ext) {
+        const pY = ext.pillars[3];
+        const pM = ext.pillars[2];
+        const pD = ext.pillars[1];
+        const pH = ext.pillars[0];
+        const dKr = input.saju.fourPillarsKorean.day;
+        const parts: string[] = [
+          `${input.name}님, 이 사주를 보면, 십이신살과 귀인의 조합이 어떻게 이 사람의 삶에 영향을 미칠지 알 수 있습니다. 각각의 요소를 하나씩보면서 풀어볼게요.`,
+          "십이신살에 대해 먼저 풀이해보겠습니다!",
+          `먼저, 초년기를 의미하는 연주부터 분석해보겠습니다. 연주에는 ${pY.sibisinsal}이 위치하고 있습니다.`,
+          sinsalPara(pY.sibisinsal, "초년기", "연주"),
+          `다음으로, 청년기를 의미하는 월주를 알아보겠습니다. 월주에는 ${pM.sibisinsal}이 위치하고 있습니다.`,
+          sinsalPara(pM.sibisinsal, "청년기", "월주"),
+          `다음으로, 중년기를 의미하는 일주를 보겠습니다. 일주에는 ${pD.sibisinsal}이 위치하고 있습니다.`,
+          sinsalPara(pD.sibisinsal, "중년기", "일주"),
+          `말년기를 의미하는 시주를 보겠습니다. 시주에는 ${pH.sibisinsal}이 위치하고 있습니다.`,
+          sinsalPara(pH.sibisinsal, "말년기", "시주"),
+          "이제 귀인에 대해서 알아볼까요?",
+        ];
+        const gwinBlocks: { pillar: string; stage: string; intro: string; names: string }[] = [
+          { pillar: "연주", stage: "초년기", intro: "초년기를 의미하는 연주를 풀이해드리겠습니다.", names: pY.gwin.join("과 ") },
+          { pillar: "월주", stage: "청년기", intro: "청년기를 의미하는 월주를 풀이해드리겠습니다.", names: pM.gwin.join("과 ") },
+          { pillar: "일주", stage: "중년기", intro: "중년기를 의미하는 일주를 풀이해드리겠습니다.", names: pD.gwin.join("과 ") },
+          { pillar: "시주", stage: "말년기", intro: "말년기를 의미하는 시주를 보겠습니다.", names: pH.gwin.join("과 ") },
+        ];
+        let anyGwin = false;
+        for (const b of gwinBlocks) {
+          if (!b.names) continue;
+          anyGwin = true;
+          parts.push(`${b.intro} ${b.pillar}에는 ${b.names}이 위치하고 있습니다.`);
+          parts.push(gwinPara(b.names, b.stage, b.pillar));
+        }
+        if (!anyGwin) {
+          parts.push(
+            `연주의 귀인은 해당없음, 월주의 귀인은 해당없음, 일주의 귀인은 해당없음, 시주의 귀인은 해당없음입니다.`,
+          );
+        }
+        parts.push(
+          "귀인은 어려운 순간에 누구의 도움을 받기 쉬운지, 혹은 어떤 환경에서 숨통이 트이는지를 보여주는 보조 지표입니다.",
+          "종합적으로, 이 사주는 초년부터 말년까지 십이신살이 장면마다 다른 리듬을 만들고, 귀인은 그 흐름을 완충하거나 도약의 통로로 작용할 여지가 있습니다. 신살을 사건으로만 고정하기보다 관계·이동·감정선과 연결해 읽고, 귀인은 맡김과 노력을 함께 가져가면 해석이 훨씬 현실에 가깝습니다.",
+          `${input.name}님은 신살과 귀인을 ${dKr} 일주 기준으로 삶의 속도와 관계 장면에 겹쳐 보시면, 부담이 커지는 구간과 숨통이 트이는 구간을 구분하기 쉬워집니다.`,
+        );
+        body = parts.join("\n\n");
+      } else {
+        const gwinByPillar = {
+          year: "해당없음",
+          month: "해당없음",
+          day: "해당없음",
+          hour: "해당없음",
+        };
+        body = `${input.name}님, 이 사주를 보면 십이신살과 귀인의 조합이 삶의 장면마다 다른 방식으로 작용할 가능성이 있습니다.\n\n십이신살에 대해 먼저 풀이해보겠습니다!\n먼저 초년기를 의미하는 연주부터 분석해보겠습니다.\n연주는 초반 환경에서 어떤 인연과 긴장감을 먼저 배우게 되는지 읽는 데 도움이 됩니다.\n\n다음으로 청년기를 의미하는 월주를 알아보겠습니다.\n월주는 사회 진입기나 직업 환경에서 반복되는 변화와 이동, 관계의 강약으로 체감될 수 있습니다.\n\n다음으로 중년기를 의미하는 일주를 보겠습니다.\n일주는 가까운 인간관계와 자기 감정선이 만나는 자리라 실제 생활 피로와 맞닿는 경우가 많습니다.\n\n말년기를 의미하는 시주를 보겠습니다.\n시주는 후반부의 관심사, 내면 성찰, 인간관계 정리 방식과 연결해서 읽어볼 수 있습니다.\n\n이제 귀인에 대해서 알아볼까요?\n연주의 귀인은 ${gwinByPillar.year}, 월주의 귀인은 ${gwinByPillar.month}, 일주의 귀인은 ${gwinByPillar.day}, 시주의 귀인은 ${gwinByPillar.hour}입니다.\n귀인은 어려운 순간에 누구의 도움을 받기 쉬운지, 혹은 어떤 환경에서 숨통이 트이는지를 보여주는 보조 지표입니다.\n\n종합적으로 보면 이 사주는 신살이 주는 사건성만 볼 것이 아니라, 귀인이 그 흐름을 어떻게 완충해 주는지까지 같이 읽어야 합니다.`;
+      }
       break;
-    case 10:
-      body = [
-        named("건강운 풀이", `${input.name}님의 건강운은 피로가 누적되는 방식과 회복 리듬이 어떻게 무너지는지를 함께 보는 편이 더 정확합니다. 몸은 갑자기 무너지는 것처럼 보여도 실제로는 수면, 식사, 스트레스 관리가 조금씩 흔들리며 누적된 결과가 많기 때문에 일상 루틴의 안정성이 핵심 지표가 됩니다.`),
-        named("나의 건강운", "컨디션은 일정, 수면, 감정 소모와 직접적으로 연결될 가능성이 큽니다. 특히 집중이 오래 필요한 시기에는 회복 시간을 미리 고정하지 않으면 피로가 급격히 쌓일 수 있으므로, 일정표에 휴식 슬롯을 먼저 배치하는 방식이 효과적입니다."),
-        named("십이신살과 귀인의 영향", "신살이 강한 시기에는 이동성 피로와 인간관계 스트레스가 몸으로 드러날 수 있고, 귀인은 회복을 돕는 사람이나 환경을 뜻할 수 있습니다. 이 시기에는 무리한 도전보다 회복 우선 전략을 택하고, 필요하면 주변 도움을 적극적으로 요청하는 것이 건강 손실을 줄이는 데 유리합니다."),
-        named("시기에 따른 나의 건강운", "초년은 기본 체력, 청년은 과로와 긴장, 중년은 누적 피로, 말년은 회복 속도와 안정 루틴이 핵심이 될 가능성이 큽니다. 시기별로 관리 포인트가 다르므로 같은 방법을 고집하기보다 현재 단계에 맞는 관리 강도를 조정해야 지속 가능한 건강 상태를 만들 수 있습니다."),
-        named("주의해야 할 질병", "특정 장기 하나를 단정하기보다, 스트레스가 쌓일 때 취약해지는 부위를 먼저 체크하시는 편이 현실적입니다. 반복되는 두통, 소화 불편, 수면 질 저하처럼 작은 신호를 초기에 관리하면 큰 문제로 번질 가능성을 낮출 수 있습니다."),
-        named("추천 운동", "걷기, 가벼운 근력 운동, 스트레칭처럼 회복과 순환을 함께 챙길 수 있는 루틴이 잘 맞을 수 있습니다. 강도보다 지속성이 중요하므로 주 3~4회, 20~40분 단위로 무리 없이 이어가는 계획이 건강운 안정에 더 효과적입니다."),
-        named("추천 식단", "규칙적인 식사와 소화가 편안한 식단을 우선하는 편이 좋습니다. 늦은 밤 과식·자극적인 음식·수분 부족을 줄이고, 단백질과 채소 비율을 안정적으로 유지하면 피로 회복 속도와 집중력 유지에 도움이 됩니다."),
-        named("종합분석", `${input.name}님의 건강운은 큰 사건보다 작은 무너짐이 반복될 때 체감 차이가 커질 수 있습니다. 따라서 몸이 보내는 초기 신호를 놓치지 않고 루틴을 먼저 정비하는 태도가 가장 현실적인 건강 관리 전략이 됩니다.`),
-      ].join("\n\n");
+    }
+    case 7: {
+      const gw = (items: string[]) => (items.length ? items.join("·") : "해당없음");
+      if (ext) {
+        const d = ext.pillars[1];
+        const py = ext.pillars[3];
+        const pm = ext.pillars[2];
+        const pd = ext.pillars[1];
+        const ph = ext.pillars[0];
+        const yyEl = formatYinyangElementKoHanja(d.stemYinYang, d.stemElement);
+        const salGwin =
+          `초년: 연주의 ${py.sibisinsal}이 연애·인연의 초기 리듬에 작용할 수 있으며, 귀인 ${gw(py.gwin)}은 도움의 통로로 읽을 수 있습니다. ` +
+          `청년: 월주 ${pm.sibisinsal}과 귀인 ${gw(pm.gwin)}은 만남의 속도·환경 변화와 연결해 볼 수 있습니다. ` +
+          `중년: 일주 ${pd.sibisinsal}과 귀인 ${gw(pd.gwin)}은 가까운 관계의 감정선·갈등 완충과 맞닿아 읽는 편이 좋습니다. ` +
+          `말년: 시주 ${ph.sibisinsal}과 귀인 ${gw(ph.gwin)}은 내면 성숙·관계 정리 방식과 연결해 볼 수 있습니다.`;
+        body = [
+          named(
+            "연애운 풀이",
+            `${input.name}님의 연애운은 감정의 깊이와 관계의 속도 조절을 함께 봐야 하는 흐름입니다. 감정이 생겼을 때 빠르게 확신을 만들기보다, 상대와의 대화 빈도·약속 이행·갈등 해결 방식이 안정적인지 시간을 두고 확인할수록 만족도가 높아질 가능성이 큽니다. ${dayPillar} 일주의 기질을 생활 장면과 겹쳐 읽으면 해석이 더 선명해집니다.`,
+          ),
+          named(
+            "일간 성격과 연애 성향",
+            `일간이 ${d.stemHanja}(${d.stemKorean}) ${yyEl}의 기질을 지닌 것으로 읽을 수 있습니다. 겉으로 드러나는 태도와 내면에서 중시하는 신뢰·안정이 연애에서도 같은 축으로 이어질 여지가 있습니다. 사랑에서는 기준을 분명히 두고 마음을 여는 속도가 신중할 수 있으나, 신뢰가 쌓이면 진지하게 관계를 지키려는 태도로 연결되기 쉽습니다. 상대에게는 차갑게 보일 수 있으니 감정의 온도를 가끔은 말로 전하는 연습이 관계 만족에 도움이 됩니다.`,
+          ),
+          named(
+            "연애에서 나타나는 장단점",
+            "장점: 기준과 책임감을 중시하는 태도는 상대에게 안정감을 줄 수 있으며, 약속과 생활 리듬을 맞추려는 성향이 관계를 오래 끌고 가는 힘으로 이어질 수 있습니다. 단점: 표현이 절제되면 상대가 확신을 느끼기 어려울 수 있고, 기준이 높아질수록 실망도 커질 수 있으니 전제를 나누는 대화가 필요합니다.",
+          ),
+          named(
+            "연애 시기와 방법",
+            "언제: 청년기와 중년기에 인연의 기회가 비교적 잘 들어올 수 있는 흐름으로 읽을 수 있으며, 중년기에는 안정적인 사랑을 다지기 좋은 리듬이 붙을 여지가 있습니다. 어디서: 일과 사회적 모임처럼 역할이 드러나는 장면에서 인연이 연결되기 쉽다고 볼 수 있습니다. 누구와: 가치관과 생활 리듬을 현실적으로 맞출 수 있는 사람, 대화로 오해를 줄이려는 사람과 잘 맞을 가능성이 큽니다. 어떻게: 신중하게 다가가되 진심을 조금씩 열어 보이면 관계의 깊이가 자연스럽게 자랄 수 있습니다.",
+          ),
+          named("살과 귀인의 영향", salGwin),
+          named(
+            "성공적인 연애를 위한 조언",
+            "냉정함과 기준이 강점이 될 수 있지만, 감정을 아예 숨기기만 하면 상대는 사랑을 체감하기 어려울 수 있습니다. 서운함이 쌓이기 전에 작은 단위로 말하는 습관과, 상대 입장을 한 번 더 헤아리는 태도가 관계의 온도를 지키는 데 큰 도움이 됩니다.",
+          ),
+          named(
+            "나의 결혼운",
+            "청년기와 중년기에 결혼운이 상승하는 흐름으로 읽을 여지가 있으며, 현실적 책임과 생활 운영이 맞는 사람과 안정적인 동반자 관계를 다지기 쉽습니다. 결혼 후에도 역할과 경계를 분명히 하되, 감정 표현이 줄지 않도록 작은 루틴을 유지하는 편이 좋습니다.",
+          ),
+          named(
+            "이상적인 배우자상과 피해야할 배우자상",
+            "이상적인 배우자상: 신뢰와 안정감을 주고, 이성과 감성의 균형을 맞출 줄 아는 사람이 잘 맞을 수 있습니다. 나의 기질을 존중하면서도 대화로 차이를 조율할 수 있는 상대라면 더 조화롭습니다. 피해야할 배우자상: 변덕이 크고 회피가 반복되거나, 약속을 가볍게 넘기는 유형은 갈등이 누적되기 쉬우니 장기적으로 부담이 될 수 있습니다.",
+          ),
+          named(
+            "배우자와의 관계 전망",
+            "신뢰를 바탕으로 점진적으로 관계를 키울 가능성이 높으며, 책임과 실질적인 가치를 함께 추구하는 안정적인 가정을 꾸릴 여지가 있습니다. 다만 바쁨 속에서 감정 표현이 줄어들면 소홀함으로 느껴질 수 있으니, 작은 확인과 감사 표현을 습관화하는 것이 중요합니다.",
+          ),
+          named(
+            "연애에서 피해야 할 점",
+            "지나치게 계산적이거나 차가운 인상만 남기지 않도록 균형을 잡으세요. 상대의 단점만 분석하거나 비판적으로만 바라보면 관계가 빠르게 소모될 수 있으니, 사실 확인과 질문 중심 대화로 방향을 잡는 편이 좋습니다.",
+          ),
+          named(
+            "종합분석",
+            `${input.name}님은 신뢰와 안정을 중시하는 연애 스타일로 읽을 수 있으며, 청년·중년을 거치며 인연의 질이 성숙해지는 흐름을 기대해볼 수 있습니다. 감정 표현과 공감을 조금만 보태면 사랑과 결혼 모두에서 긍정적인 결과를 만들 여지가 크며, ${dayPillar} 일주의 기질을 존중하면서도 관계의 속도는 의도적으로 조율하는 태도가 가장 현실적인 전략입니다.`,
+          ),
+        ].join("\n\n");
+      } else {
+        body = [
+          named("연애운 풀이", `${input.name}님의 연애운은 감정의 깊이와 관계의 속도 조절을 함께 봐야 하는 흐름입니다. 감정이 생겼을 때 빠르게 확신을 만들기보다, 상대와의 대화 빈도·약속 이행·갈등 해결 방식이 안정적인지 시간을 두고 확인할수록 만족도가 높아질 가능성이 큽니다.`),
+          named("일간 성격과 연애 성향", `${input.name}님은 신뢰가 쌓일수록 관계에 깊게 들어가는 편일 가능성이 있습니다. 다만 마음이 커질수록 기대치도 함께 올라갈 수 있으니, 원하는 관계 방식과 불편한 지점을 초반부터 구체적으로 공유하면 관계 피로를 줄이는 데 도움이 됩니다.`),
+          named("연애에서 나타나는 장단점", "장점은 진지함과 책임감으로 관계의 안정감을 만들 수 있다는 점입니다. 반면 단점은 기준이 높아지면서 실망도 커질 수 있다는 부분이므로, 상대의 표현 방식이 나와 다를 수 있다는 전제를 두고 대화를 이어가는 태도가 필요합니다."),
+          named("연애 시기와 방법", "언제: 관계를 천천히 신뢰로 쌓는 시기가 유리합니다. 어디서: 일상과 모임 속에서 자연스럽게 만나는 흐름이 잘 맞을 수 있습니다. 누구와: 대화와 약속을 지키는 사람과 궁합이 좋습니다. 어떻게: 감정을 작은 단위로 나누어 표현하며 속도를 맞추세요."),
+          named("살과 귀인의 영향", "신살의 작용이 강한 시기에는 관계의 기복이 커질 수 있고, 귀인의 흐름이 좋을 때는 좋은 인연이 들어올 가능성이 있습니다. 이 시기에는 감정 반응을 즉시 결론으로 연결하지 말고, 최소 하루 간격으로 생각을 정리한 뒤 대화하는 방식이 도움이 됩니다."),
+          named("성공적인 연애를 위한 조언", "서운함이 쌓이기 전에 작은 단위로 말하는 습관이 중요합니다. '무엇이 불편했는지-왜 힘들었는지-앞으로 어떻게 맞출지' 순서로 전달하면 감정 소모를 줄이면서도 관계를 실제로 개선할 수 있습니다."),
+          named("나의 결혼운", "결혼운은 감정보다 생활 리듬과 책임 분담이 맞는 사람과 안정적으로 이어질 가능성이 큽니다. 결혼을 고려할수록 가치관보다도 생활 운영 방식(시간, 돈, 가족, 휴식)에 대한 합의가 중요한 판단 기준이 됩니다."),
+          named("이상적인 배우자상과 피해야할 배우자상", "이상적인 배우자는 감정 표현이 안정적이고 약속을 가볍게 넘기지 않는 사람입니다. 반대로 중요한 문제를 회피하거나 감정 기복이 큰 상황에서 대화를 끊어버리는 유형은 장기적으로 피로를 키울 수 있으니 주의가 필요합니다."),
+          named("배우자와의 관계 전망", "서로 기준을 존중하고 대화 속도를 맞춘다면 오래 갈 가능성이 있습니다. 갈등이 생겼을 때 승부를 보려는 태도보다 문제를 구조적으로 나눠 해결하는 태도를 유지하면, 관계 만족도와 신뢰가 함께 높아질 수 있습니다."),
+          named("연애에서 피해야 할 점", "마음속 결론을 먼저 내리고 상대를 시험하듯 보는 태도는 피하시는 편이 좋습니다. 확인되지 않은 추측을 사실처럼 다루면 관계가 빠르게 소모될 수 있으니, 감정이 커질수록 사실 확인과 질문 중심 대화로 방향을 잡으세요."),
+          named("종합분석", `${input.name}님의 연애와 결혼운은 진심의 깊이는 충분하지만 표현 방식과 타이밍에 따라 체감 차이가 크게 나타날 수 있습니다. 핵심은 감정의 크기보다 관계 운영 방식이며, 대화 루틴과 기대 조율을 함께 가져갈수록 안정적인 흐름을 만들 가능성이 큽니다.`),
+        ].join("\n\n");
+      }
       break;
-    case 11: {
-      const daewoon = ext ? computeDaewoonTable(input.saju.fourPillarsKorean, ext.dayStem, input.gender) : null;
-      body = daewoon
-        ? [
-          `이 표는 ${input.name}님의 대운표입니다. 대운은 10년 단위의 큰 흐름을 보여주므로, 각 시기의 방향과 속도를 읽는 기준이 됩니다.`,
-          ...daewoon.columns.map((c, i) =>
+    }
+    case 8: {
+      const gw = (items: string[]) => (items.length ? items.join("·") : "해당없음");
+      if (ext) {
+        const py = ext.pillars[3];
+        const pm = ext.pillars[2];
+        const pd = ext.pillars[1];
+        const ph = ext.pillars[0];
+        const yKr = input.saju.fourPillarsKorean.year;
+        const mKr = input.saju.fourPillarsKorean.month;
+        const dKr = input.saju.fourPillarsKorean.day;
+        const hKr = input.saju.fourPillarsKorean.hour;
+        const yyEl = formatYinyangElementKoHanja(pd.stemYinYang, pd.stemElement);
+        const flowPara = (
+          stage: string,
+          pillarKr: string,
+          p: (typeof ext)["pillars"][0],
+        ) =>
+          `${stage} : ${stage}를 상징하는 ${pillarKr}(${p.stemHanja}${p.branchHanja})에는 천간 십성 ${p.sipseongStem}과 지지 십성 ${p.sipseongBranch}의 흐름이 있으며, 십이운성은 ${p.sibiunseong}에 해당합니다. 십이신살 ${p.sibisinsal}과 귀인 ${gw(p.gwin)}은 재물의 변동·기회·조언 통로로 연결해 읽을 수 있으니, 해당 시기에는 수입·지출·투자의 속도를 의도적으로 맞추는 편이 현실적입니다.`;
+        const salSet = [...new Set([py, pm, pd, ph].map((x) => x.sibisinsal))].join(", ");
+        const gwinParts = [py, pm, pd, ph].flatMap((x) => x.gwin);
+        const gwinSet = [...new Set(gwinParts)].join(", ") || "해당없음";
+        body = [
+          named(
+            "재물운 풀이",
+            `${input.name}님의 재물운은 한 번의 기회보다 관리 습관과 선택의 속도에서 차이가 벌어질 가능성이 있습니다. 큰 수입이 들어오는 순간보다, 그 수입을 지키고 다시 불릴 구조를 얼마나 일찍 만들었는지가 장기 성과를 좌우할 수 있습니다. ${dKr} 일주를 중심으로 네 기둥의 흐름을 함께 보면 해석이 더 선명해집니다.`,
+          ),
+          named(
+            "일간 성격과 재물운",
+            `나의 일간은 ${pd.stemKorean}(${pd.stemHanja}) ${yyEl}의 기질로 읽을 수 있으며, 의지와 기준을 바탕으로 목표를 세우고 밀어붙이는 힘이 재물 판단에도 스며들기 쉽습니다. 재물운과 관련해서는 실리적 판단과 계획·실행의 연결이 강점이 될 수 있으니, 지나친 완벽주의로 실행만 늦어지지 않도록 월 단위 점검 같은 가벼운 운영 도구를 먼저 고정하는 편이 유리합니다.`,
+          ),
+          named(
+            "시간에 따른 재물운의 흐름",
             [
-              `나의 ${daewoon.ages[i]}세 대운`,
-              `이번 대운의 천간은 ${c.stemHanja}(${c.stem})입니다. ${input.name}님의 역할 수행 방식과 판단 기준에 영향을 줄 수 있습니다.`,
-              `이번 대운의 지지는 ${c.branchHanja}(${c.branch})입니다. 생활 환경과 관계의 분위기가 이 지지의 영향을 받을 가능성이 있습니다.`,
-              `천간의 십성은 ${c.sipseongStem}입니다. 이 시기에는 ${c.sipseongStem}의 성격이 더 뚜렷하게 체감될 수 있습니다.`,
-              `지지의 십성은 ${c.sipseongBranch}입니다. 감정선과 반복 생활 패턴은 ${c.sipseongBranch} 쪽에서 더 선명하게 느껴질 수 있습니다.`,
-              `십이운성은 ${c.sibiunseong}입니다. 따라서 이 시기에는 ${c.sibiunseong}의 리듬에 맞춰 준비와 실행의 균형을 잡는 것이 중요합니다.`,
-              `정리해보면 ${daewoon.ages[i]}세 대운은 ${input.name}님이 기준을 어떻게 쓰느냐에 따라 체감 차이가 크게 벌어질 수 있는 시기입니다.`,
+              flowPara("초년기", yKr, py),
+              flowPara("청년기", mKr, pm),
+              flowPara("중년기", dKr, pd),
+              flowPara("말년기", hKr, ph),
             ].join("\n\n"),
           ),
-        ].join("\n\n")
-        : `${input.name}님, 대운은 10년 단위의 큰 흐름을 보여주는 장입니다. 이 장에서는 시기마다 강조되는 역할과 속도 조절 포인트를 함께 보는 방식이 중요합니다.`;
+          named(
+            "재물운이 크게 들어오는 시기",
+            `재물운이 비교적 크게 실리기 쉬운 구간은 중년기 ${dKr} 일주가 중심이 되는 시기와 말년기 ${hKr} 흐름이 안정을 받쳐주는 시기로 읽을 여지가 있습니다. 중년기에는 ${pd.sipseongStem}·${pd.sipseongBranch}의 성격이 수입 구조를 다지는 데 영향을 줄 수 있고, 말년기에는 ${ph.sipseongStem}·${ph.sipseongBranch}와 ${ph.sibiunseong} 리듬이 장기 관리·보전 쪽으로 기운을 모으기 쉽습니다. 다만 들어온 만큼 지출 구조를 같이 잡지 않으면 흐름이 빨리 새므로 현금흐름 점검을 병행하세요.`,
+          ),
+          named(
+            "살과 귀인의 영향",
+            `네 기둥의 십이신살(${salSet})은 시기마다 재물 사건의 속도와 변동성에 영향을 줄 수 있습니다. 귀인(${gwinSet})은 조언·협력·우연한 통로로 손실을 줄이거나 기회를 열 여지가 있으니, 변동이 큰 시기일수록 단독 판단보다 검증 가능한 조언 루트를 확보하는 편이 재정 안전에 도움이 됩니다.`,
+          ),
+          named(
+            "주의해야 될 시기",
+            `청년기 ${mKr} 구간에서는 ${pm.sibisinsal}의 영향으로 이동·확장·시행착오가 겹치며 지출이 커질 여지가 있으니 과도한 확장을 경계하세요. 중년기 ${dKr}에서는 ${pd.sipseongStem} 기운이 강해질 때 경쟁·주장이 겹치며 무리한 투자나 계약이 들뜰 수 있으니 속도 조절이 필요합니다. 감정 피로가 큰 날에는 보상 소비를 미루고 고정비부터 재점검하는 습관이 좋습니다.`,
+          ),
+          named(
+            "어떻게 재물을 모으게 될까?",
+            `${pd.stemKorean} 일간의 단단한 기질은 꾸준한 실행과 명확한 우선순위를 통해 재물을 쌓는 방식과 잘 맞습니다. 자동이체·지출 분류·주간 점검의 3단 구조를 먼저 고정하고, 귀인이 살아나는 시기에는 조언과 정보를 적극 활용하면 형성 속도가 안정적으로 붙기 쉽습니다.`,
+          ),
+          named(
+            "성공적인 재물의 축적 방법",
+            "구체적인 목표 금액과 기한을 정하고, 투자와 소비의 균형을 월 단위로 점검하는 편이 좋습니다. 감정 트리거(스트레스·피로·비교)가 있는 지출은 따로 기록해 누수를 줄이고, 귀인의 도움이나 신뢰할 수 있는 자문을 구조화해 두면 판단 흔들림을 줄일 수 있습니다.",
+          ),
+          named(
+            "종합분석",
+            `${input.name}님의 사주는 일간 ${yyEl}의 실리적 성향과 네 기둥의 십성·십이운성·신살 흐름이 재물운을 점차 다지는 구조로 읽을 수 있습니다. 초년·청년에는 기틀과 경험이, 중년·말년에는 축적과 보전이 강조될 여지가 있으니 시기별 목표를 바꿔 가며 운용하세요. 기회가 좋을 때 확장만 하지 않고 보전 구조를 함께 두는 태도가 장기적으로 가장 안전한 재물 전략입니다.`,
+          ),
+        ].join("\n\n");
+      } else {
+        body = [
+          named("재물운 풀이", `${input.name}님의 재물운은 한 번의 기회보다 관리 습관과 선택의 속도에서 차이가 벌어질 가능성이 있습니다. 큰 수입이 들어오는 순간보다, 그 수입을 지키고 다시 불릴 구조를 얼마나 일찍 만들었는지가 장기 성과를 좌우할 수 있습니다.`),
+          named("일간 성격과 재물운", "기준과 계획을 중시하는 태도는 재물 관리에서 강점이 될 수 있습니다. 다만 계획이 세밀할수록 실행이 늦어질 수 있으니, 월 단위 점검표처럼 간단한 운영 도구를 먼저 고정하고 점차 정교화하는 방식이 효율적입니다."),
+          named("시간에 따른 재물운의 흐름", "초년기 : 기반과 학습에 투자하는 흐름으로 읽을 수 있습니다. 청년기 : 탐색과 변화 속에서 수입 기회를 넓히되 분산이 과하면 누수가 생길 수 있습니다. 중년기 : 축적과 구조화에 집중하면 성과가 굳건해지기 쉽습니다. 말년기 : 안정·보전·장기 관리로 마무리하는 편이 유리합니다."),
+          named("재물운이 크게 들어오는 시기", "수입 자체보다 성과를 구조화할 수 있는 시기가 더 중요하게 작용할 수 있습니다. 운이 들어오는 구간에서는 지출 확대보다 안전자산·현금흐름·고정비 관리 순서로 정리하면 상승 흐름을 더 오래 유지할 수 있습니다."),
+          named("살과 귀인의 영향", "신살은 돈이 들어오고 나가는 사건성을 키울 수 있고, 귀인은 좋은 조언을 받을 통로로 작용할 수 있습니다. 즉, 변동성이 커질 때는 단독 판단보다 검증 가능한 조언 루트를 확보하는 것이 손실을 줄이는 데 실질적으로 도움이 됩니다."),
+          named("주의해야 될 시기", "감정 피로가 큰 시기에는 보상 소비나 조급한 판단이 겹칠 수 있으니 주의가 필요합니다. 이때는 고정 지출부터 재점검하고, 큰 금액의 결정은 최소 24시간 숙려 규칙을 두는 방식이 재정 안전성을 높입니다."),
+          named("어떻게 재물을 모으게 될까?", "반복 가능한 관리 습관과 지출 점검 구조를 먼저 만드는 편이 유리합니다. 월별 저축률보다도 '자동이체-지출 분류-주간 점검'의 3단 구조를 고정하면 재물 축적 속도가 훨씬 안정적으로 올라갈 수 있습니다."),
+          named("성공적인 재물의 축적 방법", "예산 금액만이 아니라 점검 횟수와 소비 패턴을 함께 관리하시는 편이 좋습니다. 특히 지출의 감정 트리거(스트레스, 피로, 비교심리)를 파악하면 불필요한 누수를 줄이고 실질적인 순자산 증가로 연결하기 쉬워집니다."),
+          named("종합분석", `${input.name}님의 재물운은 기회의 크기보다 관리 방식에 따라 체감 차이가 커질 수 있는 구조입니다. 핵심은 운이 좋을 때 확장만 하지 않고 보전 구조를 함께 만들며, 운이 약할 때는 손실 관리와 루틴 유지로 기초 체력을 지키는 데 있습니다.`),
+        ].join("\n\n");
+      }
+      break;
+    }
+    case 9: {
+      const salJobNote = (name: string) => {
+        const m: Record<string, string> = {
+          역마살: "변화·이동·대외 활동이 잦은 직무에서 기회가 열리기 쉽습니다.",
+          육해살: "대인관계에서 작은 마찰이 있을 수 있으나 배움과 조율로 전환할 여지가 있습니다.",
+          화개살: "내면·창의·연구형 업무에 유리하게 읽을 수 있습니다.",
+          도화살: "대외 이미지·소통이 중요한 직무에서 주목받을 수 있으나 경계 관리가 필요합니다.",
+        };
+        return m[name] ?? `${name}은 직업 환경의 사건성이나 리듬 변화에 영향을 줄 수 있으니 해당 시기에는 판단을 서두르지 않는 편이 안전합니다.`;
+      };
+      const gwinJobNote = (name: string) => {
+        const m: Record<string, string> = {
+          문창귀인: "학문·기획·표현이 빛날 때 주변의 지지와 조언을 받기 쉽습니다.",
+          천을귀인: "위기·이직·승인 절차처럼 막힌 구간에서 조력자나 우연한 통로가 열릴 여지가 있습니다.",
+          천덕귀인: "덕망과 신뢰로 어려움을 완충하는 인연이 작용할 수 있습니다.",
+          월덕귀인: "제도·규정·상사선에서 도움을 받기 쉬운 흐름으로 읽을 수 있습니다.",
+        };
+        return m[name] ?? `${name}은 직장·사업 판단에서 조언과 협력 통로로 작용할 수 있습니다.`;
+      };
+      if (ext) {
+        const py = ext.pillars[3];
+        const pm = ext.pillars[2];
+        const pd = ext.pillars[1];
+        const ph = ext.pillars[0];
+        const mKr = input.saju.fourPillarsKorean.month;
+        const dKr = input.saju.fourPillarsKorean.day;
+        const yyEl = formatYinyangElementKoHanja(pd.stemYinYang, pd.stemElement);
+        const igiEl = formatYinyangElementKoHanja(pd.branchYinYang, pd.branchElement);
+        const jobByElement: Record<string, string> = {
+          목: "기획·교육·성장·환경·콘텐츠처럼 확장과 기획력이 필요한 분야",
+          화: "홍보·서비스·브랜딩·현장 소통처럼 에너지가 즉시 드러나는 분야",
+          토: "행정·부동산·운영·품질관리처럼 질서와 실행을 묶는 분야",
+          금: "법률·공학·금융·정보기술·건축·관리처럼 논리·규범·정밀함이 요구되는 분야",
+          수: "연구·데이터·유통·컨설팅처럼 분석과 유연한 대응이 함께 요구되는 분야",
+        };
+        const jobCluster = jobByElement[pd.stemElement] ?? "전문성과 체계가 함께 요구되는 분야";
+        const salUnique = [...new Set([py, pm, pd, ph].map((x) => x.sibisinsal))];
+        const salBlock =
+          `네 기둥에서 읽히는 십이신살은 ${salUnique.join(", ")}입니다. ` +
+          salUnique.map((s) => `'${s}'는 ${salJobNote(s)}`).join(" ");
+        const gwinUnique = [...new Set([py, pm, pd, ph].flatMap((x) => x.gwin))];
+        const gwinIntro =
+          gwinUnique.length === 1
+            ? `'${gwinUnique[0]}' 귀인이 작용할 수 있습니다. `
+            : `${gwinUnique.map((g) => `'${g}'`).join(", ")} 귀인이 함께 작용할 수 있습니다. `;
+        const gwinBlock =
+          gwinUnique.length > 0
+            ? `${gwinIntro}` + gwinUnique.map((g) => `'${g}'는 ${gwinJobNote(g)}`).join(" ")
+            : "귀인이 비어 있는 기둥이 있으면 스스로 정보를 구조화하고 멘토링 통로를 만드는 편이 직업 안정에 도움이 됩니다.";
+        body = [
+          named(
+            "직업운 풀이",
+            `${input.name}님의 직업운은 재능을 어디에 쓰느냐와 함께, 조직·사업 맥락에서 역할을 어떻게 유지·전개하느냐에서 결과가 갈리기 쉽습니다. 업무 성과는 단기 폭발력보다 역할의 지속 가능성에서 갈릴 가능성이 크므로, ${dKr} 일주를 축으로 월주의 직장 리듬과 일·시 기둥의 사업 성향을 함께 읽는 편이 방향을 선명하게 잡는 데 도움이 됩니다.`,
+          ),
+          named(
+            "나의 일간 성격에 맞는 직업, 직무",
+            `나의 일간은 ${pd.stemKorean}으로, ${pd.stemHanja}는 ${yyEl}의 기질로 읽을 수 있습니다. 이성·논리·기준을 중시하는 성향이 강하면 문제를 구조화하고 개선안을 만드는 업무에서 강점이 오래 유지되기 쉽습니다. ${jobCluster}에서 두각을 나타낼 여지가 있으며, 규범·책임·품질이 중요한 조직에서도 안정적으로 평가받는 흐름으로 연결해 볼 수 있습니다. 일지 ${pd.branchHanja}(${pd.branchKorean}) ${igiEl}의 기운이 함께하므로 실제 직무 선택 시 협업 방식과 업무 환경의 온도(경쟁·자율·보고 체계)를 함께 고려하는 편이 좋습니다.`,
+          ),
+          named(
+            "나의 직장운",
+            `나의 사주에서 월간과 월지가 청년기·직장운의 흐름을 가리킵니다. ${mKr}에는 월간 십성이 '${pm.sipseongStem}', 월지 십성이 '${pm.sipseongBranch}'로 자리하며, 십이운성은 ${formatSibiunseongKoHanja(pm.sibiunseong)}에 해당합니다. 월지 십성은 조직 안에서의 인정·업무 태도·성과 스타일과 연결해 읽을 수 있고, 월간 십성은 경쟁·표현·협상의 긴장을 드러낼 수 있으니 동료·상사와의 의견 차이를 조기에 조율하는 습관이 안정적인 성장에 도움이 됩니다. 보고와 기대치를 문장으로 정리해 두면 불필요한 오해를 줄이고 책임 있는 역할로 확장되기 쉽습니다.`,
+          ),
+          named(
+            "나의 사업운",
+            `사업운은 일주의 일지와 시주의 시지에서 확인할 수 있습니다. 일지 십성은 '${pd.sipseongBranch}', 시지 십성은 '${ph.sipseongBranch}'이 자리하며, 시간 천간 십성은 '${ph.sipseongStem}'으로 읽을 수 있습니다. 일지 십성은 독립성·동업 적합도·리스크 성향과 맞닿아 있고, 시지 십성은 후반 운용·전략·내면의 신중함과 연결해 볼 수 있습니다. 속도만 앞서면 현금흐름과 계약 리스크가 함께 커질 수 있으니 조건을 문서화하고, 긴밀한 협력이 필요할 때는 전문가 자문을 구하는 선택이 현명합니다.`,
+          ),
+          named("십이신살과 귀인의 영향", `${salBlock} ${gwinBlock} 변동이 커지는 시기에는 단독 결정보다 검증 가능한 데이터와 조언에 기반해 이직·전환 타이밍을 잡는 편이 시행착오를 줄입니다.`),
+          named(
+            "성공적인 직장생활을 위한 조언",
+            `${yyEl} 기질은 기준이 뚜렷해 업무에서 강직하거나 완벽주의적으로 보일 수 있으니, 협업에서는 결론-근거-요청사항 순서로 커뮤니케이션을 정리하는 연습이 부담을 줄입니다. 월간 '${pm.sipseongStem}' 기운이 강해질 때는 경쟁과 속도가 붙기 쉬우니 갈등을 부드럽게 푸는 대화 스킬을 키우면 신뢰가 함께 쌓입니다. 시지 '${ph.sipseongBranch}'의 안정 에너지를 바탕으로 상사·선배와 조화를 쌓으면 장기적으로 중요한 역할을 맡기 쉬운 흐름으로 이어질 수 있습니다.`,
+          ),
+          named(
+            "종합분석",
+            `${input.name}님의 사주는 일간 ${yyEl}의 특성을 통해 이성적·체계적인 분야에서 강점을 드러낼 여지가 있습니다. 직장에서는 월간·월지 십성(${pm.sipseongStem}·${pm.sipseongBranch}) 흐름 속 경쟁을 극복하고 협력으로 전환할수록 안정적인 경로가 열립니다. 사업에서는 일지·시지 십성(${pd.sipseongBranch}·${ph.sipseongBranch})을 근거로 독립과 신중한 전략의 균형을 잡는 편이 좋습니다. 십이신살(${salUnique.join(", ")})과 귀인(${gwinUnique.join(", ") || "해당없음"})의 조화로 이동·변화 속 기회와 조력을 활용할 수 있으니, 꾸준한 실행과 열린 소통을 함께 가져가면 직장·사업 모두에서 지속 가능한 성과를 기대해볼 수 있습니다.`,
+          ),
+        ].join("\n\n");
+      } else {
+        body = [
+          named("직업운 풀이", `${input.name}님의 직업운은 능력을 어디에 쓰느냐 못지않게, 어떤 방식으로 역할을 맡고 유지하느냐가 중요할 수 있습니다. 업무 성과는 단기 폭발력보다 역할의 지속 가능성에서 갈릴 가능성이 크므로, 본인의 강점을 반복 가능한 구조로 만드는 것이 핵심입니다.`),
+          named("나의 일간 성격에 맞는 직업, 직무", "성향과 리듬이 맞는 구조를 먼저 보는 편이 좋습니다. 즉흥 대응이 많은 환경보다 기준을 세우고 개선해 나갈 수 있는 직무에서 강점이 오래 유지되며, 문제 해결형 업무에서 만족도와 성과가 함께 올라갈 가능성이 큽니다."),
+          named("나의 직장운", "직장운은 조직 안에서 신뢰를 쌓는 흐름과 연결되기 쉽습니다. 상사·동료와의 커뮤니케이션에서 '결론-근거-요청사항' 구조를 유지하면 불필요한 오해를 줄이고, 책임 있는 역할로 빠르게 확장될 가능성이 있습니다."),
+          named("나의 사업운", "독립성과 실행력이 살아날 때 강점이 드러날 수 있지만, 속도가 너무 빨라지면 리스크도 커질 수 있습니다. 사업 흐름에서는 매출보다 현금흐름과 재투자 비율을 먼저 관리해야 하며, 파트너십 계약은 조건을 문서화해 분쟁 비용을 줄이는 것이 중요합니다."),
+          named("십이신살과 귀인의 영향", "신살은 직업 변화나 환경 이동의 사건성으로, 귀인은 협업과 이직에서 도움을 받는 통로로 작용할 수 있습니다. 따라서 변동이 커지는 시기에는 혼자 결정하기보다 검증 가능한 조언과 데이터에 기반해 선택하면 시행착오를 줄일 수 있습니다."),
+          named("성공적인 직장생활을 위한 조언", "중요한 대화 전에는 핵심 쟁점을 메모로 정리하고, 감정이 올라온 날에는 즉답보다 간격을 두는 방식이 도움이 됩니다. 또한 주간 단위로 '성과-리스크-다음 행동'을 리뷰하면 직무 안정성과 성장 속도를 동시에 끌어올리기 좋습니다."),
+          named("종합분석", `${input.name}님의 직업운은 역할의 무게를 잘 버틸 수 있는 힘이 있지만, 오래 가려면 속도 조절과 소통 방식이 함께 필요합니다. 결국 커리어 성장은 능력 자체보다 역할 운영 능력에서 완성되므로, 기준을 명확히 하고 협업 품질을 높이는 전략이 가장 유효합니다.`),
+        ].join("\n\n");
+      }
+      break;
+    }
+    case 10: {
+      const salHealthNote = (name: string) => {
+        const m: Record<string, string> = {
+          역마살: "활동량이 늘 때 과로·수면 부족이 겹치기 쉬우니 이동 직후 회복 슬롯을 고정하는 편이 좋습니다.",
+          육해살: "관계·말의 오해에서 오는 긴장이 몸으로 전이될 수 있으니 대화 전 정리와 호흡 루틴이 도움이 됩니다.",
+          화개살: "생각이 많아지고 감각이 예민해질 때 수면 질이 흔들리기 쉬우니 낮 시간대 햇빛·가벼운 산책으로 리듬을 맞추면 좋습니다.",
+          도화살: "대인 스케줄이 많아지면 피로가 눈에 덜 보일 수 있으니 주간 '무소식 반나절' 같은 회복일을 두는 편이 안전합니다.",
+        };
+        return m[name] ?? `${name}은 생활 리듬이나 환경 변화와 맞물릴 때 컨디션 변동을 키울 수 있으니 무리한 일정 연속은 피하는 편이 좋습니다.`;
+      };
+      const gwinHealthNote = (name: string) => {
+        const m: Record<string, string> = {
+          천을귀인: "몸이 무너질 듯한 시기에도 회복을 돕는 사람·정보·환경이 연결될 여지가 있습니다.",
+          문창귀인: "지식·기록·상담을 통해 생활 습관을 바로잡을 단서를 얻기 쉽습니다.",
+          천덕귀인: "주변의 배려와 지지가 회복 속도를 높이는 데 도움이 될 수 있습니다.",
+        };
+        return m[name] ?? `${name}은 건강 관리와 선택에서 조언·협력 통로로 작용할 수 있습니다.`;
+      };
+      if (ext) {
+        const py = ext.pillars[3];
+        const pm = ext.pillars[2];
+        const pd = ext.pillars[1];
+        const ph = ext.pillars[0];
+        const yKr = input.saju.fourPillarsKorean.year;
+        const mKr = input.saju.fourPillarsKorean.month;
+        const dKr = input.saju.fourPillarsKorean.day;
+        const hKr = input.saju.fourPillarsKorean.hour;
+        const order = ["목", "화", "토", "금", "수"] as const;
+        const sortedEl = [...order].sort((a, b) => ext.elementPcts[b] - ext.elementPcts[a]);
+        const strong1 = sortedEl[0];
+        const strong2 = sortedEl[1];
+        const weakest = [...order].sort((a, b) => ext.elementPcts[a] - ext.elementPcts[b])[0];
+        const sipAll = [py, pm, pd, ph].flatMap((x) => [x.sipseongStem, x.sipseongBranch]);
+        const sipUnique = [...new Set(sipAll)].join(", ");
+        const sipStressy = sipAll.some((s) => s === "상관" || s === "겁재" || s === "편관");
+        const sipStabil = sipAll.some((s) => s === "정인" || s === "정관" || s === "편인");
+        const yinLead = ext.yinYangPct.yin > ext.yinYangPct.yang;
+        const yyDesc = yinLead
+          ? `음의 기운이 양보다 높게 읽히며(음 ${ext.yinYangPct.yin}%, 양 ${ext.yinYangPct.yang}%), 안정·내면·회복 쪽 리듬을 중시하는 편이 몸과 잘 맞을 수 있습니다.`
+          : `양의 기운이 음보다 높게 읽히며(양 ${ext.yinYangPct.yang}%, 음 ${ext.yinYangPct.yin}%), 활동과 발산 이후 반드시 쿨다운 시간을 넣는 편이 피로 누적을 줄입니다.`;
+        const elLine = `오행 분포는 목 ${ext.elementPcts.목}%(${ext.elementCounts.목}개), 화 ${ext.elementPcts.화}%(${ext.elementCounts.화}개), 토 ${ext.elementPcts.토}%(${ext.elementCounts.토}개), 금 ${ext.elementPcts.금}%(${ext.elementCounts.금}개), 수 ${ext.elementPcts.수}%(${ext.elementCounts.수}개)로, 비교적 두드러지는 기운은 ${strong1}·${strong2} 쪽으로 읽을 수 있습니다.`;
+        const stressLine = sipStressy
+          ? "상관·겁재·편관 계열 십성이 끼어 있으면 감정 기복·경쟁·과속 실행이 스트레스로 몸에 쌓이기 쉬우니, 수면과 식사 시간을 먼저 지키는 것이 예방의 중심이 됩니다."
+          : "십성 흐름이 한쪽으로 치우치면 그 방향의 과로(과한 책임·과한 표현 등)가 피로로 이어지기 쉬우니 주간 회복 슬롯을 고정하는 편이 좋습니다.";
+        const recoverLine = sipStabil
+          ? "정인·편인·정관 계열이 함께 있으면 체력이 떨어질 때 스스로 규칙을 되찾으려는 회복 탄력이 생기기 쉬우나, 기본 루틴을 소홀히 하면 그 효과가 반감됩니다."
+          : "회복은 '큰 휴가'보다 매일의 수면·식사 규칙에서 좌우되는 경우가 많으니 작은 루틴부터 고정하는 편이 안전합니다.";
+        const salUnique = [...new Set([py, pm, pd, ph].map((x) => x.sibisinsal))];
+        const salBlock =
+          `네 기둥에서 읽히는 십이신살은 ${salUnique.join(", ")}입니다. ` +
+          salUnique.map((s) => `'${s}'는 ${salHealthNote(s)}`).join(" ");
+        const gwinUnique = [...new Set([py, pm, pd, ph].flatMap((x) => x.gwin))];
+        const gwinIntro =
+          gwinUnique.length === 1
+            ? `'${gwinUnique[0]}' 귀인이 회복 맥락에 작용할 수 있습니다. `
+            : gwinUnique.length > 1
+              ? `${gwinUnique.map((g) => `'${g}'`).join(", ")} 귀인이 함께 작용할 수 있습니다. `
+              : "";
+        const gwinBlock =
+          gwinUnique.length > 0
+            ? `${gwinIntro}` + gwinUnique.map((g) => `'${g}'는 ${gwinHealthNote(g)}`).join(" ")
+            : "귀인이 비어 있는 기둥이 있으면 스스로 검진·상담·운동 코치처럼 신뢰할 통로를 만들어 두는 편이 건강 관리에 도움이 됩니다.";
+        const flowPara = (stage: string, kr: string, p: typeof py) => {
+          const u = formatSibiunseongKoHanja(p.sibiunseong);
+          const peak = p.sibiunseong === "제왕" || p.sibiunseong === "건록";
+          const low = p.sibiunseong === "병" || p.sibiunseong === "사" || p.sibiunseong === "묘" || p.sibiunseong === "절";
+          const rhythm = peak
+            ? "에너지가 강하게 올라갈 때 과로와 부족한 회복이 겹치기 쉬우니 수면을 먼저 확보하는 편이 좋습니다."
+            : low
+              ? "컨디션이 예민해지기 쉬운 리듬이므로 책임을 나누고 무리한 일정을 줄이는 편이 안전합니다."
+              : "리듬이 바뀌는 구간이므로 운동 강도·식사 시간을 주간 단위로 점검하면 좋습니다.";
+          return `${stage} : ${stage}를 상징하는 ${kr}(${p.stemHanja}${p.branchHanja})에는 십이운성 ${u}이 자리합니다. 천간 십성 ${p.sipseongStem}·지지 십성 ${p.sipseongBranch}의 흐름과 신살 ${p.sibisinsal}을 건강 관점에서 보면, ${rhythm}`;
+        };
+        const 호흡주의 =
+          strong1 === "금" || strong2 === "금"
+            ? "호흡·기도·건조 : 금(金) 기운이 상대적으로 강하게 읽히면 건조한 환경·환절기에 호흡과 피부 밸런스가 흔들리기 쉬우니 실내 습도·마스크·충분한 수분을 생활 습관으로 고정하는 편이 좋습니다."
+            : "호흡·순환 : 장시간 앉은 자세와 얕은 호흡이 겹치면 두통·어깨 결림으로 이어지기 쉬우니 하루 두 번 깊은 호흡·가벼운 스트레칭을 넣으면 좋습니다.";
+        const 신경주의 = sipStressy
+          ? "신경·수면·스트레스 : 상관·겁재·편관 기운이 강하면 감정 기복과 과속 실행이 수면을 깨뜨리기 쉬우니, 취침 1시간 전 디지털 차단과 고정 취침 시각이 특히 중요합니다."
+          : "신경·수면 : 업무 강도가 올라갈수록 수면이 먼저 줄어들기 쉬우니 '수면 최저선'을 주간 계획에 먼저 넣는 편이 좋습니다.";
+        const 소화주의 =
+          ph.branchElement === "토" || weakest === "토"
+            ? "소화·리듬 : 시지나 오행에서 토 기운이 약하거나 말년 리듬이 무려질 때 소화 불편이 누적되기 쉬우니 저녁 식사 시간을 앞당기고 자극적인 야식을 줄이면 도움이 됩니다."
+            : "소화·컨디션 : 스트레스가 길어지면 소화가 먼저 반응하는 경우가 많으니 규칙적인 식사와 천천히 씹는 습관을 우선하세요.";
+        const coldWarm =
+          strong1 === "수" || strong2 === "수" || strong1 === "금" || strong2 === "금"
+            ? "차고 건조한 체감을 완화하려면 따뜻한 국물·해조류·생강·대추 차처럼 온기와 수분이 함께 드는 식재료를 주 3회 이상 섞는 편이 좋습니다. 늦은 밤 냉음식·과식은 순환과 수면을 함께 흔들 수 있으니 피하는 편이 안전합니다."
+            : "규칙적인 식사와 단백질·채소 비율을 고정하면 피로 회복과 집중력 유지에 도움이 됩니다. 자극적인 음식·과도한 카페인은 수면 리듬을 깨기 쉬우니 오후 이후로 줄이면 좋습니다.";
+        body = [
+          named(
+            "건강운 풀이",
+            `${input.name}님의 건강운은 갑작스러운 이상보다 수면·식사·스트레스 관리가 조금씩 흔들리며 누적되는 패턴을 함께 보는 편이 더 정확합니다. ${dKr} 일주를 축으로 네 기둥의 십이운성과 신살 흐름을 건강 리듬에 겹쳐 읽으면, 어느 시기에 회복을 우선해야 하는지가 선명해집니다.`,
+          ),
+          named(
+            "나의 건강운",
+            `${yyDesc} ${elLine} 네 기둥에 나타나는 십성은 ${sipUnique}로 묶여 읽을 수 있습니다. ${stressLine} ${recoverLine} 이 장은 의학적 진단이 아니라 생활 예방 관점의 참고이며, 이상 징후가 지속되면 전문의 상담을 병행하는 것이 안전합니다.`,
+          ),
+          named("십이신살과 귀인의 영향", `${salBlock} ${gwinBlock} 변동이 큰 시기에는 회복을 먼저 확보하고, 필요하면 주변 도움을 요청하는 전략이 건강 손실을 줄입니다.`),
+          named(
+            "시기에 따른 나의 건강운",
+            [flowPara("초년기", yKr, py), flowPara("청년기", mKr, pm), flowPara("중년기", dKr, pd), flowPara("말년기", hKr, ph)].join("\n\n"),
+          ),
+          named("주의해야 할 질병", `${호흡주의}\n\n${신경주의}\n\n${소화주의}`),
+          named(
+            "추천 운동",
+            "유산소로 걷기·조깅·자전거처럼 순환을 돕는 활동을 주 3~4회, 20~40분 내에서 무리 없이 이어가면 컨디션 안정에 도움이 됩니다. 폐·긴장 완화에는 가벼운 요가·명상·호흡 연습을 주 2회 섞는 편이 좋습니다. 중년 이후에는 근력이 떨어지기 쉬우니 소근육·코어를 살리는 가벼운 근력과 스트레칭을 병행하세요.",
+          ),
+          named("추천 식단", coldWarm),
+          named(
+            "종합분석",
+            `${input.name}님의 건강운은 ${strong1}·${strong2} 기운이 상대적으로 두드러질 때 호흡·순환·스트레스 반응이 함께 움직이기 쉬운 구조로 읽을 수 있습니다. 십이신살(${salUnique.join(", ")})과 귀인(${gwinUnique.join(", ") || "해당없음"})은 변동과 회복 통로를 동시에 보여 주니, 무리한 일정보다 루틴을 먼저 고정하고 회복일을 주간에 넣는 태도가 가장 현실적인 관리입니다. 작은 신호(수면·소화·두통)를 초기에 조정하면 큰 무너짐으로 번질 가능성을 낮출 수 있습니다.`,
+          ),
+        ].join("\n\n");
+      } else {
+        body = [
+          named("건강운 풀이", `${input.name}님의 건강운은 피로가 누적되는 방식과 회복 리듬이 어떻게 무너지는지를 함께 보는 편이 더 정확합니다. 몸은 갑자기 무너지는 것처럼 보여도 실제로는 수면, 식사, 스트레스 관리가 조금씩 흔들리며 누적된 결과가 많기 때문에 일상 루틴의 안정성이 핵심 지표가 됩니다.`),
+          named("나의 건강운", "컨디션은 일정, 수면, 감정 소모와 직접적으로 연결될 가능성이 큽니다. 특히 집중이 오래 필요한 시기에는 회복 시간을 미리 고정하지 않으면 피로가 급격히 쌓일 수 있으므로, 일정표에 휴식 슬롯을 먼저 배치하는 방식이 효과적입니다."),
+          named("십이신살과 귀인의 영향", "신살이 강한 시기에는 이동성 피로와 인간관계 스트레스가 몸으로 드러날 수 있고, 귀인은 회복을 돕는 사람이나 환경을 뜻할 수 있습니다. 이 시기에는 무리한 도전보다 회복 우선 전략을 택하고, 필요하면 주변 도움을 적극적으로 요청하는 것이 건강 손실을 줄이는 데 유리합니다."),
+          named("시기에 따른 나의 건강운", "초년은 기본 체력, 청년은 과로와 긴장, 중년은 누적 피로, 말년은 회복 속도와 안정 루틴이 핵심이 될 가능성이 큽니다. 시기별로 관리 포인트가 다르므로 같은 방법을 고집하기보다 현재 단계에 맞는 관리 강도를 조정해야 지속 가능한 건강 상태를 만들 수 있습니다."),
+          named("주의해야 할 질병", "특정 장기 하나를 단정하기보다, 스트레스가 쌓일 때 취약해지는 부위를 먼저 체크하시는 편이 현실적입니다. 반복되는 두통, 소화 불편, 수면 질 저하처럼 작은 신호를 초기에 관리하면 큰 문제로 번질 가능성을 낮출 수 있습니다."),
+          named("추천 운동", "걷기, 가벼운 근력 운동, 스트레칭처럼 회복과 순환을 함께 챙길 수 있는 루틴이 잘 맞을 수 있습니다. 강도보다 지속성이 중요하므로 주 3~4회, 20~40분 단위로 무리 없이 이어가는 계획이 건강운 안정에 더 효과적입니다."),
+          named("추천 식단", "규칙적인 식사와 소화가 편안한 식단을 우선하는 편이 좋습니다. 늦은 밤 과식·자극적인 음식·수분 부족을 줄이고, 단백질과 채소 비율을 안정적으로 유지하면 피로 회복 속도와 집중력 유지에 도움이 됩니다."),
+          named("종합분석", `${input.name}님의 건강운은 큰 사건보다 작은 무너짐이 반복될 때 체감 차이가 커질 수 있습니다. 따라서 몸이 보내는 초기 신호를 놓치지 않고 루틴을 먼저 정비하는 태도가 가장 현실적인 건강 관리 전략이 됩니다.`),
+        ].join("\n\n");
+      }
+      break;
+    }
+    case 11: {
+      const daewoon = ext ? computeDaewoonTable(input.saju.fourPillarsKorean, ext.dayStem, input.gender) : null;
+      if (daewoon && ext) {
+        const pd = ext.pillars[1];
+        const dayStemFull = stemElementFullLabel(pd.stemKorean, pd.stemHanja, ext.dayStemElement);
+        const intro = `이 표는 ${input.name}님의 대운표입니다. 대운수는 ${daewoon.daewoonsu}세부터 시작해 10년마다 흐름이 바뀌며, 각 칸의 천간·지지·십성·십이운성을 함께 보면 그 10년의 과제와 속도감이 선명해집니다. 아래에서는 각 연령대마다 천간·지지의 상생·상극, 십성, 십이운성을 샘플과 같은 밀도로 풀어 이어갑니다.`;
+        body = [
+          intro,
+          ...daewoon.columns.map((c, i) => {
+            const stemLabel = stemElementFullLabel(c.stem, c.stemHanja, c.stemElement);
+            const branchLabel = stemElementFullLabel(c.branch, c.branchHanja, c.branchElement);
+            const pOpen = `이번 대운의 천간은 ${c.stemHanja}(${c.stem}), 지지는 ${c.branchHanja}(${c.branch})입니다.`;
+            const pStem = daewoonElementRelationParagraph(
+              input.name,
+              ext.dayStemElement,
+              c.stemElement,
+              stemLabel,
+              "천간",
+              dayStemFull,
+            );
+            const pBranch = daewoonElementRelationParagraph(
+              input.name,
+              ext.dayStemElement,
+              c.branchElement,
+              branchLabel,
+              "지지",
+              dayStemFull,
+            );
+            const pSiS = daewoonSipseongStemParagraph(input.name, c.sipseongStem);
+            const pSiB = daewoonSipseongBranchParagraph(input.name, c.sipseongBranch);
+            const u = formatSibiunseongKoHanja(c.sibiunseong);
+            const peak = c.sibiunseong === "제왕" || c.sibiunseong === "건록";
+            const low = ["병", "사", "쇠", "묘", "절"].includes(c.sibiunseong);
+            const uRhythm = peak
+              ? "에너지가 크게 올라가기 쉬워 과로와 회복 부족에 주의해야 합니다."
+              : low
+                ? "에너지가 정리·충전 쪽으로 기울기 쉬워, 성급한 추진보다 점검과 계획이 맞을 수 있습니다."
+                : "흐름이 바뀌는 구간이므로 준비와 실행의 균형을 맞추는 편이 유리합니다.";
+            const pU = `십이운성은 ${u}입니다. ${c.sibiunseong}운은 ${uRhythm} ${input.name}님은 이 시기에 규칙적인 수면과 식사를 지키고 과로를 줄이면 컨디션을 지키기 좋습니다.`;
+            const pEnd = `정리보면 ${daewoon.ages[i]}세 대운은 ${input.name}님이 ${c.sipseongStem}·${c.sipseongBranch}의 기운을 어떻게 균형 있게 쓰느냐에 따라 체감 차이가 크게 벌어질 수 있는 시기입니다. 재물·학업·관계를 한꺼번에 잡으려 하기보다 순서를 정하고 에너지를 나누면 안정적으로 흐름을 활용하기 좋습니다.`;
+            return [`나의 ${daewoon.ages[i]}세 대운`, [pOpen, pStem, pBranch, pSiS, pSiB, pU, pEnd].join("\n\n")].join("\n\n");
+          }),
+        ].join("\n\n");
+      } else {
+        body = `${input.name}님, 대운은 10년 단위의 큰 흐름을 보여주는 장입니다. 이 장에서는 시기마다 강조되는 역할과 속도 조절 포인트를 함께 보는 방식이 중요합니다.`;
+      }
       break;
     }
     case 12: {
       const yeonun = ext ? computeYeonunTable(ext.dayStem, new Date().getFullYear()) : null;
-      body = yeonun
-        ? [
-          `이 표는 ${input.name}님의 연운표입니다. 연운은 매해 달라지는 분위기와 방향성을 보여주므로, 한 해의 선택과 준비 포인트를 세밀하게 읽는 데 도움이 됩니다.`,
-          ...yeonun.columns.map((c) =>
-            [
+      if (yeonun && ext) {
+        const pd = ext.pillars[1];
+        const dayStemFull = stemElementFullLabel(pd.stemKorean, pd.stemHanja, ext.dayStemElement);
+        const y0 = new Date().getFullYear();
+        const intro = `이 표는 ${input.name}님의 연운표입니다. 연운은 매해 바뀌는 연간 간지(년주)의 분위기로, ${y0}년부터 이어지는 여섯 해 동안 외부 환경·역할·감정 리듬이 어떻게 달라지는지를 한 해씩 세밀하게 읽는 데 쓰입니다. 아래는 각 연도마다 천간·지지의 오행과 일간의 관계, 십성, 십이운성을 샘플과 비슷한 밀도로 풀어 이어갑니다.`;
+        body = [
+          intro,
+          ...yeonun.columns.map((c) => {
+            const stemComp = stemBranchElementCompound(c.stem, c.stemElement);
+            const branchComp = stemBranchElementCompound(c.branch, c.branchElement);
+            return [
               `나의 ${c.year}년 연운`,
-              `나의 ${c.year}년 연운 : 천간 ${c.stemHanja}(${c.stem})`,
-              `${c.year}년의 천간은 ${c.stemHanja}(${c.stem})로 들어오며 ${input.name}님의 외부 역할과 판단 기준의 변화를 체감하게 할 수 있습니다.`,
-              `나의 ${c.year}년 연운 : 지지 ${c.branchHanja}(${c.branch})`,
-              `${c.year}년의 지지는 ${c.branchHanja}(${c.branch})입니다. 생활 환경과 관계 분위기가 이 지지의 영향을 받을 가능성이 큽니다.`,
+              `나의 ${c.year}년 연운 : 천간 ${c.stem}`,
+              yeonunStemSectionBody(input.name, c.year, c, dayStemFull, ext.dayStemElement),
+              `나의 ${c.year}년 연운 : 지지 ${c.branch}`,
+              yeonunBranchSectionBody(input.name, c.year, c, dayStemFull, ext.dayStemElement),
               `나의 ${c.year}년 연운 : 천간 십성 ${c.sipseongStem}`,
-              `${c.sipseongStem}의 작용이 강해지면 일 처리 방식과 자기 표현의 결이 평소보다 더 뚜렷해질 수 있습니다.`,
+              yeonunSipseongStemExtendedBody(input.name, c.year, c.sipseongStem),
               `나의 ${c.year}년 연운 : 지지 십성 ${c.sipseongBranch}`,
-              `${c.sipseongBranch}은 관계와 감정선에서의 체감 변화를 보여줄 수 있습니다.`,
+              yeonunSipseongBranchExtendedBody(
+                input.name,
+                c.year,
+                c.sipseongBranch,
+                c.branchHanja,
+                c.branch,
+              ),
               `나의 ${c.year}년 연운 : 십이운성 ${c.sibiunseong}`,
-              `${c.year}년의 십이운성은 ${c.sibiunseong}입니다. 그래서 이 해에는 ${c.sibiunseong}의 리듬에 맞는 속도와 회복 방식을 함께 가져가는 편이 좋습니다.`,
+              yeonunSibiunseongExtendedBody(input.name, c.year, c.sibiunseong),
               `나의 ${c.year}년 연운 종합`,
-              `${c.year}년은 ${input.name}님에게 작은 선택의 질이 크게 체감될 수 있는 해로 읽힙니다. 기준을 정리하고 실행 순서를 나눠 가져가시면 훨씬 안정적으로 흐름을 활용하실 수 있습니다.`,
-            ].join("\n\n"),
-          ),
-        ].join("\n\n")
-        : `${input.name}님, 연운은 해마다 달라지는 세부 흐름을 읽는 장입니다. 이 장에서는 결과보다 선택의 순서와 감정 조절 방식을 함께 보는 것이 중요합니다.`;
+              yeonunYearSummaryBody(input.name, c.year, c, stemComp, branchComp),
+            ].join("\n\n");
+          }),
+        ].join("\n\n");
+      } else {
+        body = `${input.name}님, 연운은 해마다 달라지는 세부 흐름을 읽는 장입니다. 이 장에서는 결과보다 선택의 순서와 감정 조절 방식을 함께 보는 것이 중요합니다.`;
+      }
       break;
     }
     default:
