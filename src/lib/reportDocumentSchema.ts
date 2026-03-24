@@ -77,6 +77,8 @@ export type DaewoonTableBlock = {
   firstPillarLabel: string;
   ages: number[];
   columns: {
+    stem: string;
+    branch: string;
     sipseongStem: string;
     stemHanja: string;
     branchHanja: string;

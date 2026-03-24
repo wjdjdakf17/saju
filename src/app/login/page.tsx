@@ -15,10 +15,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 py-16 text-zinc-50">
       <div className="w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-900 p-8 shadow-2xl shadow-black/30">
         <div className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.24em] text-zinc-400">Protected Access</p>
-          <h1 className="text-3xl font-semibold tracking-tight">관리자 로그인</h1>
+          <p className="text-sm font-medium uppercase tracking-[0.24em] text-zinc-400">사주 결과 확인</p>
+          <h1 className="text-3xl font-semibold tracking-tight">로그인</h1>
           <p className="text-sm leading-6 text-zinc-400">
-            비밀번호를 입력하면 리포트 생성 페이지와 미리보기 페이지에 접근할 수 있습니다.
+            비밀번호를 입력하세요
           </p>
         </div>
 

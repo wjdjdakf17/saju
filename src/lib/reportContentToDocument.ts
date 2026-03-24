@@ -125,7 +125,7 @@ export type ContentToDocumentParams = {
   saju: SajuResult;
 };
 
-/** 1장 사주에 대하여 - 고정 안내 문단 (PDF 형식) */
+/** 1장 사주의 기초적인 이해 - 고정 안내 문단 (PDF 형식) */
 const CHAPTER1_FIXED_PARAGRAPHS = [
   "안녕하세요. 본격적인 사주풀이에 앞서, 사주에 대해 간단한 설명드리고 시작할게요.",
   "사주(四柱)는 인간이 태어난 연(年), 월(月), 일(日), 시(時)의 네 가지 기둥을 의미하며, 이를 통해 인간의 운명과 길흉화복을 예측하는 동양의 전통 학문입니다. 통상 사주보다는 사주팔자(四柱八字)라는 단어가 더 익숙하실 텐데요, 이는 사주라는 네 개의 기둥이 총 여덟 글자로 구성되어 있기 때문입니다.",
@@ -159,11 +159,11 @@ export function reportContentToDocument(
     rows: REPORT_CHAPTER_TITLES.map((t, i) => [String(i + 1), t]),
   });
 
-  // ─── 1장 사주에 대하여 ───
+  // ─── 1장 사주의 기초적인 이해 ───
   blocks.push({
     type: "chapterImagePage",
     src: chapterTitleImageSrc(1),
-    alt: "사주에 대하여",
+    alt: "사주의 기초적인 이해",
   });
   CHAPTER1_FIXED_PARAGRAPHS.forEach((text) => {
     blocks.push({ type: "paragraph", text: text.replaceAll("{{NAME}}", params.name) });
@@ -201,13 +201,13 @@ export function reportContentToDocument(
     const correctRows: string[][] = [
       ["십성", extended.pillars[0].sipseongStem, extended.pillars[1].sipseongStem, extended.pillars[2].sipseongStem, extended.pillars[3].sipseongStem],
       ["음양오행(천간)", ...extended.pillars.map((p) => `${p.stemHanja}(${p.stemYinYang}${p.stemElement})`)],
-      ["천간", ...extended.pillars.map((p) => p.stemHanja)],
-      ["지지", ...extended.pillars.map((p) => p.branchHanja)],
+      ["천간", ...extended.pillars.map((p) => `${p.stemHanja}(${p.stemKorean})`)],
+      ["지지", ...extended.pillars.map((p) => `${p.branchHanja}(${p.branchKorean})`)],
       ["음양오행(지지)", ...extended.pillars.map((p) => `${p.branchHanja}(${p.branchYinYang}${p.branchElement})`)],
       ["십성(지지)", ...extended.pillars.map((p) => p.sipseongBranch)],
       ["십이운성", ...extended.pillars.map((p) => p.sibiunseong)],
       ["십이신살", ...extended.pillars.map((p) => p.sibisinsal)],
-      ["귀인", ...extended.pillars.map((p) => p.gwin.join(" ") || "-")],
+      ["귀인", ...extended.pillars.map((p) => (p.gwin.length ? p.gwin.join(" · ") : "해당없음"))],
     ];
     const cellElements: (FiveElementKey | null)[][] = [
       [null, null, null, null, null],

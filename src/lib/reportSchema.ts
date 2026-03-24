@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /** PDF 형식 12장 구조 (사주결과.pdf 목차 기준) */
 export const REPORT_CHAPTER_TITLES = [
-  "사주에 대하여",
+  "사주의 기초적인 이해",
   "나의 사주팔자",
   "일주로 보는 나의 성격",
   "십성 분석",

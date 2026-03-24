@@ -32,6 +32,7 @@ export const maxDuration = 300;
 const pollRequestSchema = z.object({
   jobToken: z.string().min(20),
 });
+const MIN_SECTION_BODY_CHARS = 1200;
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim();
@@ -41,6 +42,31 @@ function progressOf(state: AsyncGenerateState, totalSteps: number): number {
   if (totalSteps <= 0) return 0;
   const ratio = state.completedSteps / totalSteps;
   return Math.max(0, Math.min(100, Math.floor(ratio * 100)));
+}
+
+function ensureSectionBodyLength(section: { heading: string; body: string }, fallback: { heading: string; body: string }): { heading: string; body: string } {
+  let body = String(section.body || "").trim();
+  if (body.length >= MIN_SECTION_BODY_CHARS) return { ...section, body };
+
+  const fallbackParagraphs = String(fallback.body || "")
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  for (const p of fallbackParagraphs) {
+    if (body.length >= MIN_SECTION_BODY_CHARS) break;
+    if (!body.includes(p)) {
+      body += `${body ? "\n\n" : ""}${p}`;
+    }
+  }
+
+  if (body.length < MIN_SECTION_BODY_CHARS) {
+    const tail = fallbackParagraphs.at(-1) || "현재 흐름을 점검하고, 다음 선택의 우선순위를 차분히 정리해보시면 좋습니다.";
+    while (body.length < MIN_SECTION_BODY_CHARS) {
+      body += `${body ? "\n\n" : ""}${tail}`;
+    }
+  }
+
+  return { ...section, body };
 }
 
 export async function POST(req: Request) {
@@ -200,14 +226,19 @@ export async function POST(req: Request) {
     } as const;
 
     // Ensure exactly 12 sections and never allow undersized bodies through.
-    const sections = [...state.report.sections].map((section, idx) =>
-      section?.body?.trim().length >= 1200 ? section : buildFallbackSection(llmInput, idx + 1),
-    );
+    const sections = [...state.report.sections].map((section, idx) => {
+      const fallback = buildFallbackSection(llmInput, idx + 1);
+      if (!section) return fallback;
+      return ensureSectionBodyLength(section, fallback);
+    });
     while (sections.length < 12) {
       sections.push(
         buildFallbackSection(llmInput, sections.length + 1),
       );
     }
+    const normalizedSections = sections.slice(0, 12).map((section, idx) =>
+      ensureSectionBodyLength(section, buildFallbackSection(llmInput, idx + 1)),
+    );
     const report = reportContentSchema.parse({
       title: state.report.title || "",
       summary: state.report.summary || {
@@ -215,7 +246,7 @@ export async function POST(req: Request) {
         keywords: [],
         highlights: [],
       },
-      sections: sections.slice(0, 12),
+      sections: normalizedSections,
       elementBalance: state.report.elementBalance || { analysis: "", tips: [] },
       disclaimer: state.report.disclaimer || "",
     });

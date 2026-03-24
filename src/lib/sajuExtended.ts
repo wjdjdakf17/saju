@@ -390,7 +390,7 @@ export function computeDaewoonTable(
     : 2;
   const ages = Array.from({ length: 10 }, (_, i) => daewoonsu + i * 10);
   const first = columns[0];
-  const firstPillarLabel = `${first.stemHanja}${first.branchHanja}`;
+  const firstPillarLabel = `${first.stemHanja}(${first.stem})${first.branchHanja}(${first.branch})`;
 
   return { daewoonsu, firstPillarLabel, ages, columns };
 }

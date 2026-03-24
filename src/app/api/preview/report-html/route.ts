@@ -41,8 +41,8 @@ export async function GET(req: Request) {
       <style>
         /* Debug frame for browser preview only */
         @media screen {
-          html, body { background: #1f1f1f !important; }
-          body { padding: 24px 0 !important; }
+          html, body { background: #ffffff !important; }
+          body { padding: 0 !important; }
           .doc-pageBg { display: none !important; }
           .doc-pageFooterLogo { outline: 1px dashed rgba(255,255,255,0.45); outline-offset: 2px; }
 
@@ -51,12 +51,12 @@ export async function GET(req: Request) {
           .doc-contentWrap {
             width: 210mm !important;
             min-height: 297mm !important;
-            margin: 18px auto !important;
+            margin: 0 auto !important;
             background: white;
-            box-shadow: 0 18px 45px rgba(0,0,0,0.45);
-            outline: 1px solid rgba(255,255,255,0.45);
-            outline-offset: 8px;
+            box-shadow: none;
+            outline: none;
             position: relative;
+            padding: 40px;
           }
 
           /* Show “content safe area” border (approx) */
@@ -72,6 +72,11 @@ export async function GET(req: Request) {
   }
 
   return new NextResponse(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
   });
 }

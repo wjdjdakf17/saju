@@ -166,7 +166,7 @@ function renderBlock(block: Block): string {
       const cy = 240;
       const r = 136;
       const circleR = 50;
-      const outerCurveR = 158;
+      const outerCurveR = 160;
       const deg = (i: number) => (270 - i * 72) * (Math.PI / 180);
       const pos = (i: number) => ({
         x: cx + r * Math.cos(deg(i)),
@@ -192,15 +192,15 @@ function renderBlock(block: Block): string {
       const sangsaengSegments: [number, number][] = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0]];
       const sangsaengPaths = sangsaengSegments.map(([a, b]) => {
         const mid = (deg(a) + deg(b)) / 2;
-        const start = pointOnEdge(positions[a], positions[b], circleR + 14);
+        const start = pointOnEdge(positions[a], positions[b], circleR + 16);
         const end = pointOnEdge(positions[b], positions[a], circleR + 18);
         return `M ${start.x} ${start.y} Q ${cx + outerCurveR * Math.cos(mid)} ${cy + outerCurveR * Math.sin(mid)} ${end.x} ${end.y}`;
       });
       const sanggukSegments: [number, number][] = [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]];
       const sanggukPaths = sanggukSegments.map(
         ([a, b]) => {
-          const start = pointOnEdge(positions[a], positions[b], circleR + 10);
-          const end = pointOnEdge(positions[b], positions[a], circleR + 14);
+          const start = pointOnEdge(positions[a], positions[b], circleR + 16);
+          const end = pointOnEdge(positions[b], positions[a], circleR + 18);
           return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
         },
       );
@@ -221,18 +221,18 @@ function renderBlock(block: Block): string {
       return `<div class="doc-block doc-ohaeng-wheel">
         <p class="doc-ohaeng-title">나의 오행: ${escapeHtml(block.dayStemLabel)}</p>
         <div class="doc-ohaeng-legend">
-          <span class="doc-ohaeng-legend-item"><svg width="24" height="12" viewBox="0 0 24 12"><path d="M1 6 H18" stroke="#5c93ff" stroke-width="2" fill="none"/><path d="M14 2 L19 6 L14 10" stroke="#5c93ff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> 상생</span>
-          <span class="doc-ohaeng-legend-item"><svg width="24" height="12" viewBox="0 0 24 12"><path d="M1 6 H18" stroke="#ef5a5a" stroke-width="2" fill="none"/><path d="M14 2 L19 6 L14 10" stroke="#ef5a5a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> 상극</span>
+          <span class="doc-ohaeng-legend-item"><svg width="24" height="12" viewBox="0 0 24 12"><path d="M1 6 H18" stroke="#4e82e6" stroke-width="2.1" fill="none"/><path d="M13.5 3 L19 6 L13.5 9 Z" fill="#4e82e6"/></svg> 상생</span>
+          <span class="doc-ohaeng-legend-item"><svg width="24" height="12" viewBox="0 0 24 12"><path d="M1 6 H18" stroke="#e06464" stroke-width="1.9" fill="none" stroke-dasharray="4 3"/><path d="M13.5 3 L19 6 L13.5 9 Z" fill="#e06464"/></svg> 상극</span>
         </div>
         <div class="doc-ohaeng-frame">
         <svg class="doc-ohaeng-svg" viewBox="0 0 520 480" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <marker id="doc-ohaeng-arrow-blue" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto"><polygon points="0 0, 10 5, 0 10" fill="#5c93ff"/></marker>
-            <marker id="doc-ohaeng-arrow-red" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto"><polygon points="0 0, 10 5, 0 10" fill="#ef5a5a"/></marker>
+            <marker id="doc-ohaeng-arrow-blue" markerWidth="7" markerHeight="7" refX="6.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4e82e6"/></marker>
+            <marker id="doc-ohaeng-arrow-red" markerWidth="7" markerHeight="7" refX="6.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3.5 L0,7 Z" fill="#e06464"/></marker>
           </defs>
           <circle cx="${cx}" cy="${cy}" r="106" fill="none" stroke="rgba(210, 180, 140, 0.28)" stroke-width="1.5" stroke-dasharray="4 8"/>
-          ${sangsaengPaths.map((d) => `<path d="${d}" fill="none" stroke="#5c93ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#doc-ohaeng-arrow-blue)"/>`).join("\n          ")}
-          ${sanggukPaths.map((d) => `<path d="${d}" fill="none" stroke="#ef5a5a" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#doc-ohaeng-arrow-red)"/>`).join("")}
+          ${sangsaengPaths.map((d) => `<path d="${d}" fill="none" stroke="#4e82e6" stroke-width="2.3" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#doc-ohaeng-arrow-blue)"/>`).join("\n          ")}
+          ${sanggukPaths.map((d) => `<path d="${d}" fill="none" stroke="#e06464" stroke-width="1.9" stroke-opacity="0.9" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#doc-ohaeng-arrow-red)"/>`).join("")}
           ${circlesHtml}
         </svg>
         </div>
@@ -249,8 +249,8 @@ function renderBlock(block: Block): string {
     case "daewoonTable": {
       const ageHeaderCells = block.ages.map((age) => `<th class="doc-dw-th">${escapeHtml(String(age))}</th>`).join("");
       const sipseongStemRow = `<tr><td class="doc-dw-label">십성</td>${block.columns.map((c) => `<td class="doc-dw-td">${escapeHtml(c.sipseongStem)}</td>`).join("")}</tr>`;
-      const stemRow = `<tr><td class="doc-dw-label">천간</td>${block.columns.map((c) => `<td class="doc-dw-td doc-dw-pillar doc-cell-${escapeHtml(c.stemElement)}">${escapeHtml(c.stemHanja)}</td>`).join("")}</tr>`;
-      const branchRow = `<tr><td class="doc-dw-label">지지</td>${block.columns.map((c) => `<td class="doc-dw-td doc-dw-pillar doc-cell-${escapeHtml(c.branchElement)}">${escapeHtml(c.branchHanja)}</td>`).join("")}</tr>`;
+      const stemRow = `<tr><td class="doc-dw-label">천간</td>${block.columns.map((c) => `<td class="doc-dw-td doc-dw-pillar doc-cell-${escapeHtml(c.stemElement)}">${escapeHtml(`${c.stemHanja}(${c.stem})`)}</td>`).join("")}</tr>`;
+      const branchRow = `<tr><td class="doc-dw-label">지지</td>${block.columns.map((c) => `<td class="doc-dw-td doc-dw-pillar doc-cell-${escapeHtml(c.branchElement)}">${escapeHtml(`${c.branchHanja}(${c.branch})`)}</td>`).join("")}</tr>`;
       const sipseongBranchRow = `<tr><td class="doc-dw-label">십성</td>${block.columns.map((c) => `<td class="doc-dw-td">${escapeHtml(c.sipseongBranch)}</td>`).join("")}</tr>`;
       const sibiunseongRow = `<tr><td class="doc-dw-label">십이운성</td>${block.columns.map((c) => `<td class="doc-dw-td">${escapeHtml(c.sibiunseong)}</td>`).join("")}</tr>`;
       return `<div class="doc-block doc-daewoon-wrap">
@@ -288,8 +288,8 @@ function renderBlock(block: Block): string {
         (c) => `<tr class="doc-yn-year-row">
           <td class="doc-yn-td doc-yn-year">${escapeHtml(String(c.year))}년</td>
           <td class="doc-yn-td">${escapeHtml(c.sipseongStem)}</td>
-          <td class="doc-yn-td doc-yn-pillar doc-cell-${escapeHtml(c.stemElement)}">${escapeHtml(c.stemHanja)}</td>
-          <td class="doc-yn-td doc-yn-pillar doc-cell-${escapeHtml(c.branchElement)}">${escapeHtml(c.branchHanja)}</td>
+          <td class="doc-yn-td doc-yn-pillar doc-cell-${escapeHtml(c.stemElement)}">${escapeHtml(`${c.stemHanja}(${c.stem})`)}</td>
+          <td class="doc-yn-td doc-yn-pillar doc-cell-${escapeHtml(c.branchElement)}">${escapeHtml(`${c.branchHanja}(${c.branch})`)}</td>
           <td class="doc-yn-td">${escapeHtml(c.sipseongBranch)}</td>
           <td class="doc-yn-td">${escapeHtml(c.sibiunseong)}</td>
         </tr>`,
@@ -374,6 +374,8 @@ function groupBlocksIntoCards(blocks: Block[]): Block[][] {
 const DOC_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;500;600;700;900&family=Nanum+Myeongjo:wght@400;700;800&display=swap');
   @page { size: A4; margin: 0; }
+  @page cover { size: A4; margin: 0; }
+  @page content { size: A4; margin: 0; }
   :root {
     --doc-bg: #f5f0e8;
     --doc-card-bg: #ffffff;
@@ -391,7 +393,7 @@ const DOC_CSS = `
   html, body { min-height: 100%; margin: 0; }
   body {
     font-family: var(--doc-font);
-    font-size: 17px;
+    font-size: 19px;
     line-height: var(--doc-line-height);
     color: var(--doc-text);
     background: var(--doc-bg);
@@ -417,13 +419,25 @@ const DOC_CSS = `
     max-width: none;
     margin: 0;
     padding: 0;
+    box-sizing: border-box;
+  }
+  .doc-contentPad {
+    width: 100%;
+    box-sizing: border-box;
+    padding-top: 0;
+    padding-bottom: 0;
   }
   @media print {
     .doc-contentWrap { min-height: 0; }
+    .doc-contentPad {
+      padding-top: 0;
+      padding-bottom: 0;
+    }
   }
 
   /* 표지: A4 1페이지 전체 사용 */
   .doc-coverPage {
+    page: cover;
     position: relative;
     z-index: 2;
     height: 297mm;
@@ -439,7 +453,26 @@ const DOC_CSS = `
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .doc-coverPage::before {
+    content: "";
+    position: absolute;
+    inset: 14mm 10mm;
+    border: 1.5px solid rgba(121, 83, 52, 0.2);
+    border-radius: 20px;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .doc-coverPage::after {
+    content: "";
+    position: absolute;
+    inset: 18mm 14mm;
+    border: 1px solid rgba(121, 83, 52, 0.14);
+    border-radius: 16px;
+    z-index: 1;
+    pointer-events: none;
+  }
   .doc-chapterImagePage {
+    page: cover;
     position: relative;
     z-index: 2;
     width: 210mm;
@@ -470,54 +503,107 @@ const DOC_CSS = `
   }
   .doc-coverPanel {
     position: relative;
-    z-index: 1;
+    z-index: 2;
     width: min(520px, 86%);
-    border-radius: 18px;
-    background: #fefdfb;
-    border: 1px solid rgba(68, 64, 60, 0.12);
-    box-shadow: 0 18px 45px rgba(0,0,0,0.12);
-    padding: 26px 28px 22px;
+    border-radius: 20px;
+    background:
+      linear-gradient(180deg, rgba(255, 251, 245, 0.95) 0%, rgba(255, 249, 241, 0.95) 100%);
+    border: 1px solid rgba(121, 83, 52, 0.22);
+    box-shadow:
+      0 14px 34px rgba(56, 36, 23, 0.14),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    padding: 34px 34px 26px;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    overflow: hidden;
+  }
+  .doc-coverPanel::before {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    border: 1px solid rgba(130, 94, 63, 0.18);
+    border-radius: 14px;
+    pointer-events: none;
+  }
+  .doc-coverPanel::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 14px;
+    transform: translateX(-50%);
+    width: 140px;
+    height: 10px;
+    border-top: 2px solid rgba(136, 98, 64, 0.4);
+    border-bottom: 2px solid rgba(136, 98, 64, 0.12);
+    border-radius: 999px;
+    pointer-events: none;
   }
   @media print {
     .doc-coverPanel {
-      background: #fff;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 2px 14px rgba(56, 36, 23, 0.12);
     }
   }
-  .doc-cover-eyebrow { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #44403c; margin: 0 0 12px; font-weight: 700; }
-  .doc-cover-title { font-size: 30px; font-weight: 900; letter-spacing: -0.03em; margin: 0; line-height: 1.25; color: #1a1918; }
-  .doc-cover-subtitle { margin: 14px 0 0; font-size: 14px; line-height: 1.6; color: #57534e; }
-  .doc-cover-metaRow { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; }
-  .doc-cover-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: rgba(68, 64, 60, 0.1); color: #44403c; font-size: 12px; font-weight: 700; }
-  .doc-cover-rule { height: 1px; background: rgba(68, 64, 60, 0.2); margin: 18px 0; }
+  .doc-cover-ornamentTop {
+    margin: 0 auto 12px;
+    width: fit-content;
+    padding: 2px 14px;
+    border: 1px solid rgba(129, 88, 55, 0.28);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: #6b4a2f;
+    background: rgba(255, 250, 242, 0.75);
+  }
+  .doc-cover-eyebrow { font-size: 13px; letter-spacing: 0.2em; color: #5b3b26; margin: 0 0 14px; font-weight: 800; text-align: center; }
+  .doc-cover-title { font-size: 40px; font-weight: 900; letter-spacing: -0.03em; margin: 0; line-height: 1.24; color: #1f1712; text-align: center; }
+  .doc-cover-subtitle { margin: 16px auto 0; font-size: 16px; line-height: 1.78; color: #4d3d33; text-align: center; max-width: 92%; }
+  .doc-cover-metaRow { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .doc-cover-chip { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px; background: rgba(125, 89, 57, 0.12); border: 1px solid rgba(125, 89, 57, 0.18); color: #4f3724; font-size: 13px; font-weight: 700; }
+  .doc-cover-rule { height: 1px; background: linear-gradient(90deg, rgba(125, 89, 57, 0) 0%, rgba(125, 89, 57, 0.44) 50%, rgba(125, 89, 57, 0) 100%); margin: 22px 0 16px; }
   .doc-cover-brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .doc-cover-brandName { font-size: 13px; font-weight: 800; letter-spacing: 0.08em; color: #44403c; margin: 0; }
-  .doc-cover-stamp { font-size: 12px; font-weight: 800; color: #44403c; }
+  .doc-cover-brandName { font-size: 14px; font-weight: 800; letter-spacing: 0.1em; color: #4f3724; margin: 0; }
+  .doc-cover-stamp {
+    width: 64px;
+    height: 64px;
+    border-radius: 999px;
+    border: 2px solid rgba(143, 36, 31, 0.75);
+    color: #8f241f;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 246, 244, 0.8);
+  }
 
   .doc-stack { display: block; }
   .doc-card {
+    page: content;
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 28mm 16mm 32mm;
+    padding: 10mm 16mm 12mm;
     margin-bottom: 0;
     box-shadow: none;
-    break-inside: avoid;
-    page-break-inside: avoid;
+    break-inside: auto;
+    page-break-inside: auto;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
   .doc-card:last-child { margin-bottom: 0; }
   .doc-card.doc-card--break { break-before: page; page-break-before: always; }
 
   .doc-block { margin-bottom: var(--doc-space); }
   .doc-block:last-child { margin-bottom: 0; }
-  .doc-title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--doc-text); margin-bottom: 12px; }
-  .doc-subtitle { font-size: 16px; color: var(--doc-text-muted); margin-bottom: 18px; line-height: 1.9; }
-  .doc-paragraph { font-size: 16px; color: var(--doc-text); line-height: 2.08; margin-bottom: 18px; white-space: pre-line; }
+  .doc-title { font-size: 27px; font-weight: 800; letter-spacing: -0.02em; color: var(--doc-text); margin-bottom: 12px; }
+  .doc-subtitle { font-size: 18px; color: var(--doc-text-muted); margin-bottom: 18px; line-height: 1.9; }
+  .doc-paragraph { font-size: 18px; color: var(--doc-text); line-height: 2.08; margin-bottom: 18px; white-space: pre-line; }
   .doc-inlineTitle {
     display: inline-block;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 900;
     letter-spacing: -0.01em;
     color: #1c1917;
@@ -530,7 +616,7 @@ const DOC_CSS = `
   }
   .doc-paragraphLeadTitle {
     display: inline-block;
-    font-size: 17px;
+    font-size: 18px;
     font-weight: 900;
     letter-spacing: -0.01em;
     color: #1c1917;
@@ -544,15 +630,15 @@ const DOC_CSS = `
     border: 1px solid #d6d3d1;
     background: #fafaf9;
     color: var(--doc-text-muted);
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
   }
-  .doc-bulletList-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--doc-text); }
+  .doc-bulletList-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: var(--doc-text); }
   .doc-bulletList-ul, .doc-orderedList-ol { margin: 0; padding-left: 24px; }
   .doc-bulletList-ul { list-style: disc; }
   .doc-bulletList-item, .doc-orderedList-item {
     margin-bottom: 18px;
-    font-size: 16px;
+    font-size: 18px;
     line-height: 2.05;
     color: var(--doc-text);
   }
@@ -562,14 +648,14 @@ const DOC_CSS = `
 
   .doc-scoreBlock { margin-bottom: 6px; }
   .doc-scoreBlock-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
-  .doc-scoreBlock-title { font-size: 17px; font-weight: 700; color: var(--doc-text); flex: 1 1 auto; }
+  .doc-scoreBlock-title { font-size: 18px; font-weight: 700; color: var(--doc-text); flex: 1 1 auto; }
   .doc-scoreBar-wrap { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .doc-scoreBar { width: 88px; height: 11px; background: #e7e5e4; border-radius: 999px; overflow: hidden; }
   .doc-scoreBar-fill { height: 100%; background: var(--doc-score-fill); border-radius: 999px; }
-  .doc-scoreBar-num { font-size: 16px; font-weight: 700; color: var(--doc-text); min-width: 28px; }
+  .doc-scoreBar-num { font-size: 17px; font-weight: 700; color: var(--doc-text); min-width: 28px; }
 
   .doc-table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--doc-card-border); margin-top: 14px; margin-bottom: 14px; break-inside: avoid; page-break-inside: avoid; }
-  .doc-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .doc-table { width: 100%; border-collapse: collapse; font-size: 17px; }
   .doc-table th, .doc-table td { padding: 13px 15px; text-align: center; border: 1px solid #e7e5e4; }
   .doc-table th { background: #f1f0ed; font-weight: 700; color: var(--doc-text); }
   .doc-table td:first-child { text-align: left; background: #fafaf9; font-weight: 600; color: var(--doc-text-muted); }
@@ -581,13 +667,13 @@ const DOC_CSS = `
   .doc-keyValue { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .doc-kv-row { border: 1px solid #e7e5e4; border-radius: 10px; padding: 12px 14px; background: #fafaf9; }
   .doc-kv-key { display: block; font-size: 13px; color: var(--doc-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-  .doc-kv-val { font-size: 16px; font-weight: 600; color: var(--doc-text); }
+  .doc-kv-val { font-size: 18px; font-weight: 600; color: var(--doc-text); }
 
-  .doc-footer { font-size: 14px; color: var(--doc-text-muted); line-height: 1.8; margin-top: 10px; }
+  .doc-footer { font-size: 16px; color: var(--doc-text-muted); line-height: 1.8; margin-top: 10px; }
   .doc-divider { height: 1px; background: #e7e5e4; margin: 22px 0; }
   .doc-image { text-align: center; margin: 20px 0; }
   .doc-img { max-width: 180px; height: auto; opacity: 0.9; }
-  .doc-img-caption { display: block; font-size: 14px; color: var(--doc-text-muted); margin-top: 10px; }
+  .doc-img-caption { display: block; font-size: 15px; color: var(--doc-text-muted); margin-top: 10px; }
 
   .doc-sectionDivider { text-align: center; margin: 20px 0; }
   .doc-sectionDivider img { max-width: 100px; height: auto; opacity: 0.65; }
@@ -633,7 +719,7 @@ const DOC_CSS = `
   .doc-card--subcover { break-after: page; page-break-after: always; min-height: 220mm; display: flex; align-items: center; justify-content: center; }
   .doc-chapter-subcover { width: 100%; }
   .doc-subcover-title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: var(--doc-text); margin: 0 0 28px; text-align: center; }
-  .doc-subcover-p { font-size: 16px; line-height: 2; color: var(--doc-text); margin: 0 0 20px; }
+  .doc-subcover-p { font-size: 18px; line-height: 2; color: var(--doc-text); margin: 0 0 20px; }
   .doc-subcover-p:last-child { margin-bottom: 0; }
 
   /* 2장: 동물 + 인적사항 (좌 패널 + 우 텍스트) */
@@ -642,13 +728,13 @@ const DOC_CSS = `
   .doc-profile-animal-img { width: 100%; height: auto; max-height: 140px; object-fit: contain; display: block; }
   .doc-profile-animal-label { display: block; font-size: 15px; font-weight: 700; color: var(--doc-text); margin-top: 10px; }
   .doc-profile-info { flex: 1; min-width: 200px; }
-  .doc-profile-line { font-size: 16px; line-height: 1.85; margin: 0 0 10px; color: var(--doc-text); }
+  .doc-profile-line { font-size: 18px; line-height: 1.85; margin: 0 0 10px; color: var(--doc-text); }
   .doc-profile-line:first-child { font-size: 19px; font-weight: 700; }
   .doc-profile-disclaimer { font-size: 14px; color: var(--doc-text-muted); font-style: normal; }
 
   /* 사주원국 표: 셀별 오행 배경색 */
   .doc-saju-table-wrap { margin: 20px 0; border-radius: 12px; border: 1px solid var(--doc-card-border); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-  .doc-saju-table { font-size: 15px; }
+  .doc-saju-table { font-size: 17px; }
   .doc-saju-table th, .doc-saju-table .doc-saju-td { padding: 13px 15px; text-align: center; border: 1px solid #e7e5e4; }
   .doc-saju-table th { background: #f1f0ed; font-weight: 700; color: var(--doc-text); }
   .doc-saju-table .doc-saju-td { background: #ffffff; }
@@ -677,8 +763,8 @@ const DOC_CSS = `
   .doc-element-수 { background: #4a6fa5; }
 
   /* 나의 오행: 원형 다이어그램 (상생/상극) */
-  .doc-ohaeng-wheel { text-align: center; margin: 18px 0 24px; break-inside: avoid; page-break-inside: avoid; }
-  .doc-ohaeng-title { font-size: 19px; font-weight: 800; color: var(--doc-text); margin: 0 0 10px; }
+  .doc-ohaeng-wheel { text-align: center; margin: 28px 0 36px; break-inside: avoid; page-break-inside: avoid; }
+  .doc-ohaeng-title { font-size: 19px; font-weight: 800; color: var(--doc-text); margin: 14px 0 10px; }
   .doc-ohaeng-legend { display: flex; justify-content: center; gap: 20px; margin-bottom: 14px; font-size: 14px; color: var(--doc-text-muted); }
   .doc-ohaeng-legend-item { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
   .doc-ohaeng-frame {
@@ -694,14 +780,14 @@ const DOC_CSS = `
   .doc-ohaeng-svg { width: 100%; max-width: 390px; height: auto; display: block; margin: 0 auto; overflow: visible; }
   .doc-ohaeng-name { font-size: 20px; font-weight: 800; fill: #fff; font-family: var(--doc-font); }
   .doc-ohaeng-value { font-size: 13px; font-weight: 700; fill: rgba(255,255,255,0.98); font-family: var(--doc-font); }
-  .doc-ohaeng-footer { font-size: 14px; color: var(--doc-text-muted); margin: 12px 0 0; }
+  .doc-ohaeng-footer { font-size: 14px; color: var(--doc-text-muted); margin: 18px 0 0; }
 
   /* 11장 대운표 */
   .doc-daewoon-wrap { margin: 24px 0; break-inside: avoid; page-break-inside: avoid; }
   .doc-daewoon-title { font-size: 19px; font-weight: 800; color: var(--doc-text); margin: 0 0 8px; }
-  .doc-daewoon-intro { font-size: 15px; color: var(--doc-text-muted); margin: 0 0 16px; line-height: 1.85; }
+  .doc-daewoon-intro { font-size: 16px; color: var(--doc-text-muted); margin: 0 0 16px; line-height: 1.85; }
   .doc-daewoon-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--doc-card-border); margin: 12px 0; }
-  .doc-daewoon-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .doc-daewoon-table { width: 100%; border-collapse: collapse; font-size: 16px; }
   .doc-daewoon-table .doc-dw-th, .doc-daewoon-table .doc-dw-td { padding: 11px 9px; text-align: center; border: 1px solid #e7e5e4; }
   .doc-daewoon-table .doc-dw-label-th { background: #f1f0ed; font-weight: 700; min-width: 64px; }
   .doc-daewoon-table .doc-dw-label { text-align: left; background: #fafaf9; font-weight: 600; color: var(--doc-text-muted); }
@@ -748,7 +834,7 @@ const DOC_CSS = `
   /* 12장 6년 연운표 (연도별 한 행 공통 스타일) */
   .doc-yeonun-wrap { margin: 24px 0; break-inside: avoid; page-break-inside: avoid; }
   .doc-yeonun-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--doc-card-border); margin: 12px 0; background: #f8f7f5; }
-  .doc-yeonun-table { width: 100%; border-collapse: separate; border-spacing: 6px; font-size: 14px; }
+  .doc-yeonun-table { width: 100%; border-collapse: separate; border-spacing: 6px; font-size: 16px; }
   .doc-yeonun-table .doc-yn-th, .doc-yeonun-table .doc-yn-td { padding: 11px 12px; text-align: center; border-radius: 8px; font-weight: 600; }
   .doc-yeonun-table thead .doc-yn-th { background: #f1f0ed; color: var(--doc-text-muted); font-size: 13px; }
   .doc-yeonun-table .doc-yn-label-th { text-align: left; min-width: 72px; }
@@ -802,7 +888,7 @@ const DOC_CSS = `
   /* 마지막 꼬리: 브랜드 마무리 (최대감사주) */
   .doc-brand-closing { margin-top: 32px; padding-top: 24px; border-top: 1px solid #e7e5e4; }
   .doc-brand-closing-inner { max-width: 560px; }
-  .doc-brand-closing .doc-brand-p { font-size: 15px; line-height: 1.85; color: var(--doc-text); margin: 0 0 16px; }
+  .doc-brand-closing .doc-brand-p { font-size: 17px; line-height: 1.85; color: var(--doc-text); margin: 0 0 16px; }
   .doc-brand-closing .doc-brand-p:last-of-type { margin-bottom: 20px; }
   .doc-brand-closing .doc-brand-name { font-size: 14px; font-weight: 700; color: var(--doc-accent); margin: 0; letter-spacing: 0.02em; }
   .doc-card--final {
@@ -814,16 +900,16 @@ const DOC_CSS = `
   }
 
   /* 음양 바 */
-  .doc-yin-yang-bar { margin: 20px 0; break-inside: avoid; page-break-inside: avoid; }
+  .doc-yin-yang-bar { margin: 34px 0 30px; break-inside: avoid; page-break-inside: avoid; }
   .doc-yy-bar {
     display: flex;
     width: 100%;
     height: 42px;
-    border-radius: 999px;
+    border-radius: 10px;
     overflow: hidden;
-    border: 1px solid rgba(68, 64, 60, 0.14);
-    background: rgba(255,255,255,0.7);
-    box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+    border: 1px solid rgba(17, 24, 39, 0.22);
+    background: rgba(248,250,252,0.9);
+    box-shadow: none;
   }
   .doc-yy-seg {
     display: flex;
@@ -836,10 +922,14 @@ const DOC_CSS = `
     letter-spacing: -0.01em;
   }
   .doc-yy-yang {
-    background: linear-gradient(135deg, #f6e6a7 0%, #f3d8b4 55%, #f0c7c7 100%);
+    background: linear-gradient(135deg, #0f4c81 0%, #1f5f99 55%, #2f6fa8 100%);
+    color: rgba(255, 255, 255, 0.96);
+    text-shadow: none;
   }
   .doc-yy-yin {
-    background: linear-gradient(135deg, #bfe6e7 0%, #c7d6f6 55%, #d9c8f4 100%);
+    background: linear-gradient(135deg, #334155 0%, #475569 55%, #64748b 100%);
+    color: rgba(255, 255, 255, 0.96);
+    text-shadow: none;
   }
 `;
 
@@ -884,11 +974,12 @@ export function renderReportFromDocument(
   <title>${escapeHtml(document.title)}</title>
   <style>${DOC_CSS}</style>
 </head>
-<body class="doc-body">
+<body class="doc-body" style="${contentBgStyle}">
   <section class="doc-coverPage">
     <div class="doc-coverBg" style="${coverBgStyle}"></div>
     ${coverFooterLogoHtml}
     <div class="doc-coverPanel">
+      <p class="doc-cover-ornamentTop">프리미엄 사주 리포트</p>
       <p class="doc-cover-eyebrow">사주 결과</p>
       <h1 class="doc-cover-title">${escapeHtml(params.name)}님 정통 평생 운세</h1>
       <p class="doc-cover-subtitle">사주 원국·오행·십성·운세 흐름을 바탕으로, 지금의 선택에 도움이 되는 해석과 조언을 담았습니다.</p>
@@ -900,13 +991,16 @@ export function renderReportFromDocument(
       <div class="doc-cover-rule"></div>
       <div class="doc-cover-brand">
         <p class="doc-cover-brandName">최대감사주</p>
+        <span class="doc-cover-stamp">정통</span>
       </div>
     </div>
   </section>
-  <div class="doc-contentWrap" style="${contentBgStyle}">
+  <div class="doc-contentWrap">
     <div class="doc-contentInner">
-      <div class="doc-stack">
-        ${cardsHtml}
+      <div class="doc-contentPad">
+        <div class="doc-stack">
+          ${cardsHtml}
+        </div>
       </div>
     </div>
   </div>
