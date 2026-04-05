@@ -2,7 +2,7 @@ import type { ReportDocument, Block, FiveElementKey } from "@/lib/reportDocument
 
 export type DocumentRenderParams = {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   backgroundImageUrl?: string;
@@ -25,8 +25,85 @@ function escapeCssUrl(s: string): string {
   return String(s).replace(/["'()\\\n\r]/g, "");
 }
 
+/**
+ * LLM이 생성하는 가독성 저해 패턴 제거:
+ * - 한자 내부 한글 읽기 주석 제거: 辛(신)金 → 辛金  (결과: 신금(辛金))
+ * - 한국어 조사 이중 표기 제거: 은(는) → 은, 이(가) → 이, 을(를) → 을, 과(와) → 과
+ */
+function cleanupLlmArtifacts(text: string): string {
+  // CJK 한자 한 글자 뒤에 한글 1~3자 괄호 주석 제거: 辛(신) → 辛
+  let t = text.replace(/[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]\(([가-힣]{1,3})\)/g, (match) =>
+    match.replace(/\([가-힣]{1,3}\)/, ""),
+  );
+  // 조사 이중 표기
+  const particlePairs: [RegExp, string][] = [
+    [/은\(는\)/g, "은"], [/는\(은\)/g, "는"],
+    [/이\(가\)/g, "이"], [/가\(이\)/g, "가"],
+    [/을\(를\)/g, "을"], [/를\(을\)/g, "를"],
+    [/과\(와\)/g, "과"], [/와\(과\)/g, "와"],
+    [/으로\(로\)/g, "으로"], [/로\(으로\)/g, "로"],
+    [/아\(야\)/g, "아"], [/야\(아\)/g, "야"],
+  ];
+  for (const [pattern, replacement] of particlePairs) {
+    t = t.replace(pattern, replacement);
+  }
+  return t;
+}
+
+/**
+ * 한 줄 안에서 "레이블:" 패턴이 이어질 때 앞에 줄바꿈을 삽입한다.
+ * 예: "초년: 어쩌구 청년: 저쩌구" → "초년: 어쩌구\n청년: 저쩌구"
+ */
+function normalizeLineBreaksBeforeLabels(text: string): string {
+  // 특징/영향 : 앞 줄바꿈 (collapseInnerNewlines로 한 줄이 됐을 때도 분리)
+  let t = text.replace(/([^\n])\s*(특징\s*:)/g, "$1\n$2");
+  t = t.replace(/([^\n])\s*(영향\s*:)/g, "$1\n$2");
+  // 장점/단점 앞 줄바꿈
+  t = t.replace(/([^\n])(장점\s*:|단점\s*:)/g, "$1\n$2");
+  // 초년/청년/중년/말년 앞 줄바꿈 (기 포함 모두)
+  t = t.replace(/([^\n])\s*(초년기?|청년기?|중년기?|말년기?)\s*:/g, "$1\n$2:");
+  // 언제/어디서/누구와/어떻게 앞 줄바꿈
+  t = t.replace(/([^\n])\s*(언제|어디서|누구와|어떻게)\s*:/g, "$1\n$2:");
+  return t;
+}
+
+/** HTML-이스케이프된 문자열에서 레이블 키워드를 볼드 처리 */
+function applyInlineBoldLabels(html: string): string {
+  // 특징:/영향:/장점:/단점: → <strong>
+  html = html.replace(
+    /(^|<br \/>)\s*(특징|영향|장점|단점)\s*:/g,
+    '$1<strong class="doc-label-bold">$2</strong>:',
+  );
+  // 초년:/청년:/중년:/말년: (콜론 있는 형식) → 스테이지 레이블 pill
+  html = html.replace(
+    /(^|<br \/>)\s*(초년기?|청년기?|중년기?|말년기?)\s*:/g,
+    '$1<span class="doc-stage-label">$2</span>:',
+  );
+  // 언제:/어디서:/누구와:/어떻게: → 볼드
+  html = html.replace(
+    /(^|<br \/>)\s*(언제|어디서|누구와|어떻게)\s*:/g,
+    '$1<strong class="doc-label-bold">$2</strong>:',
+  );
+  return html;
+}
+
+/** 단락 텍스트의 첫 20자 안에 인생 단계 키워드가 있으면 해당 단계명을 반환 */
+function detectLeadingStage(text: string): string | null {
+  // "먼저", "다음으로", "이어서", "마지막으로" 등 connector 이후에도 매칭
+  const m = text.trimStart().match(
+    /^(?:먼저[,，\s]*|다음으로[,，\s]*|이어서[,，\s]*|마지막으로[,，\s]*)?(초년기|청년기|중년기|말년기)/,
+  );
+  if (!m || (m.index ?? 0) > 8) return null;
+  return m[1] ?? null;
+}
+
+/** 스테이지 섹션 헤더 HTML 반환 */
+function stageHeaderHtml(stageName: string): string {
+  return `<div class="doc-stage-header"><span class="doc-stage-header-label">${escapeHtml(stageName)}</span><span class="doc-stage-header-rule"></span></div>`;
+}
+
 function renderParagraphHtml(text: string): string {
-  const raw = String(text);
+  const raw = normalizeLineBreaksBeforeLabels(cleanupLlmArtifacts(String(text)));
   const tipPrefix = "핵심 요약";
   const trimmedStart = raw.replace(/^\s+/, "");
   if (trimmedStart.startsWith(tipPrefix)) {
@@ -35,6 +112,21 @@ function renderParagraphHtml(text: string): string {
     const rest = trimmedStart.slice(tipPrefix.length);
 
     return `${escapeHtml(leadingWs)}<span class="doc-inlineTitle">${escapeHtml(tipPrefix)}</span>${escapeHtml(rest)}`.replace(/\n/g, "<br />");
+  }
+
+  // 단락이 인생 단계(초년기/청년기/중년기/말년기)로 시작하면 섹션 구분 헤더 삽입
+  // 헤더를 주입한 뒤에는 본문에서 스테이지 레이블 접두어를 제거해 중복 렌더링을 방지한다.
+  const stageKey = detectLeadingStage(raw);
+  if (stageKey) {
+    // "먼저 청년기 :", "이어서 중년기:" 등 다양한 형태의 접두어를 제거
+    const bodyText = raw
+      .replace(
+        /^(?:먼저[,，\s]*|다음으로[,，\s]*|이어서[,，\s]*|마지막으로[,，\s]*)?(초년기|청년기|중년기|말년기)\s*:?\s*/,
+        "",
+      )
+      .trimStart();
+    const bodyHtml = applyInlineBoldLabels(escapeHtml(bodyText).replace(/\n/g, "<br />"));
+    return `${stageHeaderHtml(stageKey)}<div class="doc-stage-body">${bodyHtml}</div>`;
   }
 
   const lines = raw.replace(/\r\n/g, "\n").split("\n");
@@ -50,10 +142,11 @@ function renderParagraphHtml(text: string): string {
 
   if (looksLikeSectionLead) {
     const rest = restLines.join("\n").trimStart();
-    return `<span class="doc-paragraphLeadTitle">${escapeHtml(headingCandidate)}</span>${rest ? `<br />${escapeHtml(rest).replace(/\n/g, "<br />")}` : ""}`;
+    const bodyHtml = applyInlineBoldLabels(escapeHtml(rest).replace(/\n/g, "<br />"));
+    return `<span class="doc-paragraphLeadTitle">${escapeHtml(headingCandidate)}</span>${rest ? `<br />${bodyHtml}` : ""}`;
   }
 
-  return escapeHtml(raw).replace(/\n/g, "<br />");
+  return applyInlineBoldLabels(escapeHtml(raw).replace(/\n/g, "<br />"));
 }
 
 function renderBlock(block: Block): string {
@@ -111,8 +204,10 @@ function renderBlock(block: Block): string {
       return `<div class="doc-block doc-chapter-subcover"><h2 class="doc-subcover-title">${escapeHtml(block.title)}</h2>${ps}</div>`;
     }
     case "profileWithAnimal": {
+      const g = block.gender.trim();
+      const nameLine = g ? `${escapeHtml(block.name)}(${escapeHtml(g)})` : escapeHtml(block.name);
       const infoLines = [
-        `${escapeHtml(block.name)}(${escapeHtml(block.gender)})`,
+        nameLine,
         `${escapeHtml(block.birthLabel)} (${escapeHtml(block.calendarLabel)})`,
         `오행: ${escapeHtml(block.dayElementStem)} | 일주 동물: ${escapeHtml(block.dayAnimalLabel)}`,
         `<em class="doc-profile-disclaimer">${escapeHtml(block.disclaimer)}</em>`,
@@ -191,7 +286,12 @@ function renderBlock(block: Block): string {
       };
       const sangsaengSegments: [number, number][] = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0]];
       const sangsaengPaths = sangsaengSegments.map(([a, b]) => {
-        const mid = (deg(a) + deg(b)) / 2;
+        // Normalize angles so they are within π of each other (prevents wrong-side arc when crossing 0°)
+        let angA = deg(a);
+        let angB = deg(b);
+        if (angA - angB > Math.PI) angB += 2 * Math.PI;
+        else if (angB - angA > Math.PI) angA += 2 * Math.PI;
+        const mid = (angA + angB) / 2;
         const start = pointOnEdge(positions[a], positions[b], circleR + 16);
         const end = pointOnEdge(positions[b], positions[a], circleR + 18);
         return `M ${start.x} ${start.y} Q ${cx + outerCurveR * Math.cos(mid)} ${cy + outerCurveR * Math.sin(mid)} ${end.x} ${end.y}`;
@@ -227,8 +327,8 @@ function renderBlock(block: Block): string {
         <div class="doc-ohaeng-frame">
         <svg class="doc-ohaeng-svg" viewBox="0 0 520 480" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <marker id="doc-ohaeng-arrow-blue" markerWidth="7" markerHeight="7" refX="6.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4e82e6"/></marker>
-            <marker id="doc-ohaeng-arrow-red" markerWidth="7" markerHeight="7" refX="6.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3.5 L0,7 Z" fill="#e06464"/></marker>
+            <marker id="doc-ohaeng-arrow-blue" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,1 L12,6.5 L0,12 Z" fill="#4e82e6"/></marker>
+            <marker id="doc-ohaeng-arrow-red" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,1 L12,6.5 L0,12 Z" fill="#e06464"/></marker>
           </defs>
           <circle cx="${cx}" cy="${cy}" r="106" fill="none" stroke="rgba(210, 180, 140, 0.28)" stroke-width="1.5" stroke-dasharray="4 8"/>
           ${sangsaengPaths.map((d) => `<path d="${d}" fill="none" stroke="#4e82e6" stroke-width="2.3" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#doc-ohaeng-arrow-blue)"/>`).join("\n          ")}
@@ -321,6 +421,33 @@ function renderBlock(block: Block): string {
         </div>
       </div>`;
     }
+    case "reportSummary": {
+      const keywordsHtml = block.keywords.map((k) => `<span class="doc-summary-chip">${escapeHtml(k)}</span>`).join("");
+      const highlightsHtml = block.highlights.map((h) => `<li class="doc-summary-highlight-item">${escapeHtml(h)}</li>`).join("");
+      const chapterRowsHtml = block.chapterSummaries.map((c) =>
+        `<div class="doc-summary-chapter-row">
+          <span class="doc-summary-chapter-num">${c.number}</span>
+          <span class="doc-summary-chapter-title">${escapeHtml(c.title)}</span>
+          <span class="doc-summary-chapter-excerpt">${escapeHtml(c.excerpt)}</span>
+        </div>`,
+      ).join("");
+      return `<section class="doc-summary-page">
+        <div class="doc-summary-header">
+          <p class="doc-summary-eyebrow">전체 리포트 요약</p>
+          <h2 class="doc-summary-name">${escapeHtml(block.name)}님을 위한 핵심 정리</h2>
+          <p class="doc-summary-oneline">${escapeHtml(block.oneLine)}</p>
+          <div class="doc-summary-chips">${keywordsHtml}</div>
+        </div>
+        <div class="doc-summary-section">
+          <p class="doc-summary-section-label">핵심 포인트</p>
+          <ul class="doc-summary-highlight-list">${highlightsHtml}</ul>
+        </div>
+        <div class="doc-summary-section">
+          <p class="doc-summary-section-label">장별 핵심 한 줄</p>
+          <div class="doc-summary-chapters">${chapterRowsHtml}</div>
+        </div>
+      </section>`;
+    }
     case "brandClosing": {
       const paragraphsHtml = block.paragraphs.map((p) => `<p class="doc-brand-p">${escapeHtml(p)}</p>`).join("");
       return `<div class="doc-block doc-brand-closing">
@@ -349,7 +476,7 @@ function groupBlocksIntoCards(blocks: Block[]): Block[][] {
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
-    if (b.type === "chapterSubcover" || b.type === "chapterImagePage") {
+    if (b.type === "chapterSubcover" || b.type === "chapterImagePage" || b.type === "reportSummary") {
       flush();
       cards.push([b]);
       continue;
@@ -363,6 +490,11 @@ function groupBlocksIntoCards(blocks: Block[]): Block[][] {
       flush();
       current.push(b);
       flush();
+      continue;
+    }
+    if (b.type === "brandClosing") {
+      flush();
+      current.push(b);
       continue;
     }
     current.push(b);
@@ -564,6 +696,52 @@ const DOC_CSS = `
   .doc-cover-rule { height: 1px; background: linear-gradient(90deg, rgba(125, 89, 57, 0) 0%, rgba(125, 89, 57, 0.44) 50%, rgba(125, 89, 57, 0) 100%); margin: 22px 0 16px; }
   .doc-cover-brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .doc-cover-brandName { font-size: 14px; font-weight: 800; letter-spacing: 0.1em; color: #4f3724; margin: 0; }
+  .doc-cover-summary-hint {
+    margin: 18px -34px -26px;
+    border-top: 1px solid rgba(125, 89, 57, 0.18);
+    background: linear-gradient(135deg, #5c3317 0%, #7c4a1e 100%);
+    border-radius: 0 0 20px 20px;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .doc-cover-summary-hint-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 22px;
+  }
+  .doc-cover-summary-hint-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .doc-cover-summary-hint-text {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    line-height: 1.4;
+  }
+  .doc-cover-summary-hint-text strong {
+    font-weight: 800;
+    color: #fff;
+  }
+  .doc-cover-summary-hint-arrow {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.7);
+    flex-shrink: 0;
+    font-weight: 300;
+  }
   .doc-cover-stamp {
     width: 64px;
     height: 64px;
@@ -621,6 +799,57 @@ const DOC_CSS = `
     letter-spacing: -0.01em;
     color: #1c1917;
     margin-bottom: 8px;
+  }
+  .doc-label-bold {
+    font-weight: 800;
+    color: #1c1917;
+  }
+  .doc-stage-label {
+    display: inline-block;
+    font-weight: 800;
+    color: #7c3f20;
+    background: rgba(139, 69, 19, 0.08);
+    border: 1px solid rgba(139, 69, 19, 0.18);
+    border-radius: 6px;
+    padding: 1px 7px;
+    margin-right: 3px;
+    font-size: 0.95em;
+    letter-spacing: -0.01em;
+  }
+
+  /* ─── 인생 단계 섹션 구분 헤더 ─── */
+  .doc-stage-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 28px 0 10px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .doc-stage-header-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 18px;
+    border-radius: 999px;
+    background: #7c3f20;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .doc-stage-header-rule {
+    flex: 1;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(124, 63, 32, 0.4) 0%, rgba(124, 63, 32, 0.05) 100%);
+  }
+  .doc-stage-body {
+    font-size: inherit;
+    line-height: inherit;
+    color: inherit;
+    padding-left: 4px;
   }
   .doc-keywords { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
   .doc-chip {
@@ -891,6 +1120,135 @@ const DOC_CSS = `
   .doc-brand-closing .doc-brand-p { font-size: 17px; line-height: 1.85; color: var(--doc-text); margin: 0 0 16px; }
   .doc-brand-closing .doc-brand-p:last-of-type { margin-bottom: 20px; }
   .doc-brand-closing .doc-brand-name { font-size: 14px; font-weight: 700; color: var(--doc-accent); margin: 0; letter-spacing: 0.02em; }
+
+  /* ─── 전체 요약 페이지 ─── */
+  .doc-summary-page {
+    break-before: page;
+    page-break-before: always;
+    padding: 44px 44px 40px;
+    background: linear-gradient(160deg, #fdf9f5 0%, #fff8ef 100%);
+    border-radius: 20px;
+    border: 1px solid rgba(193, 154, 107, 0.22);
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .doc-summary-eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #9a6b3a;
+    margin: 0 0 8px;
+  }
+  .doc-summary-name {
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    color: #1c1917;
+    margin: 0 0 10px;
+    line-height: 1.28;
+  }
+  .doc-summary-oneline {
+    font-size: 16px;
+    line-height: 1.7;
+    color: #44403c;
+    margin: 0 0 14px;
+  }
+  .doc-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .doc-summary-chip {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: 999px;
+    background: rgba(155, 107, 58, 0.1);
+    border: 1px solid rgba(155, 107, 58, 0.22);
+    color: #7c4a1e;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .doc-summary-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .doc-summary-section-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #9a6b3a;
+    margin: 0;
+    text-transform: uppercase;
+    border-bottom: 1.5px solid rgba(155, 107, 58, 0.2);
+    padding-bottom: 6px;
+  }
+  .doc-summary-highlight-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 20px;
+  }
+  .doc-summary-highlight-item {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1c1917;
+    padding-left: 16px;
+    position: relative;
+  }
+  .doc-summary-highlight-item::before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: #c1966b;
+    font-size: 10px;
+    top: 4px;
+  }
+  .doc-summary-chapters {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .doc-summary-chapter-row {
+    display: grid;
+    grid-template-columns: 26px 130px 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(193, 154, 107, 0.12);
+  }
+  .doc-summary-chapter-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: #c1966b;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .doc-summary-chapter-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1c1917;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .doc-summary-chapter-excerpt {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #57534e;
+  }
   .doc-card--final {
     position: relative;
     break-before: page;
@@ -950,6 +1308,23 @@ export function renderReportFromDocument(
     ? `<img class="doc-coverFooterLogo" src="${escapeHtml(params.footerLogoUrl)}" alt="" />`
     : "";
 
+  /**
+   * 같은 카드 내에서 연속으로 동일한 스테이지 헤더(초년기/청년기 등)가 나오면
+   * 두 번째부터는 제거한다. renderParagraphHtml이 각 단락을 독립적으로 처리하므로
+   * 같은 단계를 소개하는 짧은 문장과 본문 문장이 연달아 헤더를 생성할 수 있다.
+   */
+  function deduplicateStageHeaders(html: string): string {
+    let lastStage: string | null = null;
+    return html.replace(
+      /<div class="doc-stage-header"><span class="doc-stage-header-label">([^<]+)<\/span><span class="doc-stage-header-rule"><\/span><\/div>/g,
+      (match, stage) => {
+        if (stage === lastStage) return "";
+        lastStage = stage;
+        return match;
+      },
+    );
+  }
+
   const cards = groupBlocksIntoCards(document.blocks);
   const finalCardIndex = cards.length - 1;
   const cardsHtml = cards
@@ -960,8 +1335,10 @@ export function renderReportFromDocument(
       const isSubcover = first?.type === "chapterSubcover";
       const isFinalCard = index === finalCardIndex;
       const cardClass = ["doc-card", isToc ? "doc-card--toc" : "", isSubcover ? "doc-card--subcover" : "", isFinalCard ? "doc-card--final" : ""].filter(Boolean).join(" ");
-      const blockHtml = cardBlocks.map((b) => renderBlock(b)).join("");
-      if (isImagePage) return blockHtml;
+      const isSummaryPage = first?.type === "reportSummary";
+      const rawHtml = cardBlocks.map((b) => renderBlock(b)).join("");
+      const blockHtml = deduplicateStageHeaders(rawHtml);
+      if (isImagePage || isSummaryPage) return blockHtml;
       return `<div class="${cardClass}">${blockHtml}${isFinalCard ? footerLogoHtml : ""}</div>`;
     })
     .join("");
@@ -992,6 +1369,13 @@ export function renderReportFromDocument(
       <div class="doc-cover-brand">
         <p class="doc-cover-brandName">최대감사주</p>
         <span class="doc-cover-stamp">정통</span>
+      </div>
+      <div class="doc-cover-summary-hint">
+        <div class="doc-cover-summary-hint-inner">
+          <span class="doc-cover-summary-hint-badge">핵심 요약</span>
+          <span class="doc-cover-summary-hint-text">리포트 마지막 페이지에 <strong>전체 핵심 요약본</strong>이 있습니다</span>
+          <span class="doc-cover-summary-hint-arrow">→</span>
+        </div>
       </div>
     </div>
   </section>

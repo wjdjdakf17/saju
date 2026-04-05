@@ -20,9 +20,16 @@ const llmConfigSchema = z.object({
   model: z.string().min(1).max(80).optional(),
 });
 
+/** 빈 문자열·공백·필드 생략은 미입력으로 처리 (대운 등은 남성 기준과 동일하게 계산) */
+export const optionalGenderSchema = z.preprocess((val) => {
+  if (val === undefined || val === null) return undefined;
+  const s = String(val).trim();
+  return s.length === 0 ? undefined : s;
+}, z.string().min(1).max(20).optional());
+
 export const generateRequestSchema = z.object({
   name: z.string().min(1).max(50),
-  gender: z.string().min(1).max(20),
+  gender: optionalGenderSchema,
   calendar: z.enum(["solar", "lunar"]),
   birth: birthSchema,
   isLeapMonth: z.boolean().optional(),
@@ -38,6 +45,7 @@ export type AsyncReportPartial = {
   summary?: ReportContent["summary"];
   sections: ReportContent["sections"];
   elementBalance?: ReportContent["elementBalance"];
+  chapterOneLiners?: string[];
   disclaimer?: ReportContent["disclaimer"];
 };
 

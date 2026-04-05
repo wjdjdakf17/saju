@@ -136,6 +136,17 @@ export type YeonunDetailTableBlock = {
   branchElement: FiveElementKey;
 };
 
+/** 전체 리포트 요약 페이지 */
+export type ReportSummaryBlock = {
+  type: "reportSummary";
+  name: string;
+  oneLine: string;
+  keywords: string[];
+  highlights: string[];
+  chapterSummaries: Array<{ number: number; title: string; excerpt: string }>;
+  elementAnalysis: string;
+};
+
 /** 마지막 꼬리: 브랜드 마무리 문구 (최대감사주 등) */
 export type BrandClosingBlock = {
   type: "brandClosing";
@@ -167,7 +178,8 @@ export type Block =
   | YeonunTableBlock
   | YeonunDetailTableBlock
   | BrandClosingBlock
-  | YinYangBarBlock;
+  | YinYangBarBlock
+  | ReportSummaryBlock;
 
 export type ReportDocument = {
   id?: string;

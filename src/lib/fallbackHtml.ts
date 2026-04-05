@@ -2,7 +2,7 @@ import type { SajuResult } from "@/lib/saju";
 
 export function generateFallbackHtml(params: {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   backgroundImageUrl?: string;
@@ -73,7 +73,7 @@ export function generateFallbackHtml(params: {
         <div class="grid">
           <div class="kv">
             <p class="k">이름 / 성별</p>
-            <p class="v">${escapeHtml_(params.name)} · ${escapeHtml_(params.gender)}</p>
+            <p class="v">${escapeHtml_(params.name)}${params.gender?.trim() ? ` · ${escapeHtml_(params.gender.trim())}` : ""}</p>
           </div>
           <div class="kv">
             <p class="k">생년월일/시간</p>

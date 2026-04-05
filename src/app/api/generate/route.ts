@@ -15,6 +15,7 @@ import { resolveReportBackgroundImageUrl, resolveReportFooterLogoUrl } from "@/l
 import { renderReportHtml } from "@/lib/reportTemplate";
 import { computeSaju } from "@/lib/saju";
 import { renderPdfFromTypst } from "@/lib/typst";
+import { optionalGenderSchema } from "@/lib/asyncJob";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ const birthSchema = z.object({
 
 const requestSchema = z.object({
   name: z.string().min(1).max(50),
-  gender: z.string().min(1).max(20),
+  gender: optionalGenderSchema,
   calendar: z.enum(["solar", "lunar"]),
   birth: birthSchema,
   isLeapMonth: z.boolean().optional(),
@@ -173,7 +174,7 @@ export async function POST(req: Request) {
     }
 
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
-    const fileName = sanitizeFileName(`${input.name}_saju.pdf`);
+    const fileName = sanitizeFileName(`${input.name}의 사주결과.pdf`);
 
     const payload: Record<string, unknown> = {
       fileName,

@@ -9,7 +9,7 @@ import type { SajuResult } from "@/lib/saju";
 
 export async function renderPdfFromTypst(params: {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   saju: SajuResult;
@@ -32,7 +32,7 @@ export async function renderPdfFromTypst(params: {
 
 function buildTypstDocument_(params: {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   saju: SajuResult;
@@ -61,7 +61,7 @@ function buildTypstDocument_(params: {
   stroke: rgb("#cbd5e1"),
   fill: rgb("#f8fafc"),
 )[
-  *이름:* ${escapeTypst_(params.name)} / ${escapeTypst_(params.gender)}  \\
+  *이름:* ${escapeTypst_(params.name)}${params.gender?.trim() ? ` / ${escapeTypst_(params.gender.trim())}` : ""}  \\
   *달력:* ${escapeTypst_(params.calendarLabel)}  \\
   *생년월일:* ${escapeTypst_(params.birthLabel)}  \\
   *사주(한글):* ${escapeTypst_(params.saju.fourPillars.fullKorean)}  \\

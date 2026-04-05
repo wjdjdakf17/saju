@@ -169,6 +169,16 @@ export async function POST(req: Request) {
       }
     } else if (state.stage === "tail") {
       if (process.env.REPORT_DEBUG_OUTPUT === "true") console.log("[poll] running stage: tail (LLM)");
+
+      // Build per-chapter excerpts so the LLM can generate personalised one-liners
+      const sectionExcerpts = state.report.sections.slice(0, 12).map((sec, idx) => {
+        const firstLine = (sec.body ?? "").split(/\n+/).find((l) => l.trim().length >= 20) ?? sec.body ?? "";
+        return {
+          title: sec.heading ?? `${idx + 1}장`,
+          excerpt: firstLine.slice(0, 200),
+        };
+      });
+
       const tailPart = await generateReportTailPart(
         {
           name: state.input.name,
@@ -186,9 +196,11 @@ export async function POST(req: Request) {
         },
         debugCapture,
         state.input.llm,
+        sectionExcerpts,
       );
 
       state.report.elementBalance = tailPart.elementBalance;
+      state.report.chapterOneLiners = tailPart.chapterOneLiners;
       state.report.disclaimer = tailPart.disclaimer;
       state.stage = "render";
       state.completedSteps += 1;
@@ -285,6 +297,7 @@ export async function POST(req: Request) {
           sectionDividerImageUrl,
           saju: state.saju,
           report,
+          chapterOneLiners: state.report.chapterOneLiners,
         });
         pdfBytes = await renderPdfFromHtml({ html: htmlFallback });
       }
@@ -300,11 +313,12 @@ export async function POST(req: Request) {
         sectionDividerImageUrl,
         saju: state.saju,
         report,
+        chapterOneLiners: state.report.chapterOneLiners,
       });
       pdfBytes = await renderPdfFromHtml({ html });
     }
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
-    const fileName = sanitizeFileName(`${state.input.name}_saju.pdf`);
+    const fileName = sanitizeFileName(`${state.input.name}의 사주결과.pdf`);
 
     const payload: Record<string, unknown> = {
       status: "completed",

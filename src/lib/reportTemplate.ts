@@ -69,7 +69,7 @@ export async function embedPublicImagesInDocument(document: ReportDocument, asse
 
 export async function renderReportHtml(params: {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   assetBaseUrl?: string;
@@ -79,6 +79,8 @@ export async function renderReportHtml(params: {
   sectionDividerImageUrl?: string;
   saju: SajuResult;
   report: ReportContent;
+  /** LLM-generated per-chapter one-line summaries (12 items) */
+  chapterOneLiners?: string[];
 }): Promise<string> {
   const document = reportContentToDocument(params.report, {
     name: params.name,
@@ -86,6 +88,7 @@ export async function renderReportHtml(params: {
     calendarLabel: params.calendarLabel,
     birthLabel: params.birthLabel,
     saju: params.saju,
+    chapterOneLiners: params.chapterOneLiners,
   });
   const documentWithEmbeddedImages = await embedPublicImagesInDocument(document, params.assetBaseUrl);
 

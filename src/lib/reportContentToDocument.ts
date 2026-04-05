@@ -128,10 +128,12 @@ function splitYeonunBody(body: string, years: number[]): { intro: string; items:
 
 export type ContentToDocumentParams = {
   name: string;
-  gender: string;
+  gender?: string;
   calendarLabel: string;
   birthLabel: string;
   saju: SajuResult;
+  /** LLM-generated per-chapter one-line summaries (12 items) */
+  chapterOneLiners?: string[];
 };
 
 /** 1장 사주의 기초적인 이해 - 고정 안내 문단 (PDF 형식) */
@@ -197,7 +199,7 @@ export function reportContentToDocument(
       animalImageSrc: iconSrc,
       animalLabel: extended.dayAnimalLabel,
       name: params.name,
-      gender: params.gender,
+      gender: params.gender?.trim() ?? "",
       birthLabel: params.birthLabel,
       calendarLabel: params.calendarLabel,
       dayElementStem: params.saju.dayElement.stem,
@@ -257,11 +259,7 @@ export function reportContentToDocument(
       yinPct: extended.yinYangPct.yin,
     });
 
-    daewoonTableData = computeDaewoonTable(
-      fpK,
-      extended.dayStem,
-      params.gender,
-    );
+    daewoonTableData = computeDaewoonTable(fpK, extended.dayStem, params.gender);
     yeonunTableData = computeYeonunTable(extended.dayStem, new Date().getFullYear());
 
     blocks.push({
@@ -269,9 +267,11 @@ export function reportContentToDocument(
       text: "사주원국을 보았으니, 이제 음양오행(陰陽五行)에 대해서 좀 더 자세히 알아보도록 하겠습니다.",
     });
   } else {
+    const g = params.gender?.trim();
+    const headline = g ? `${params.name}(${g})` : params.name;
     blocks.push({
       type: "paragraph",
-      text: `${params.name}(${params.gender})\n${params.birthLabel} (${params.calendarLabel})\n오행: ${params.saju.dayElement.stem}`,
+      text: `${headline}\n${params.birthLabel} (${params.calendarLabel})\n오행: ${params.saju.dayElement.stem}`,
     });
     blocks.push({
       type: "table",
@@ -293,12 +293,10 @@ export function reportContentToDocument(
 
   // ─── 3~12장 (각각 제목 + 불릿) ───
   const ILJU_CHAPTER_INDEX = 2; // 3장 = sections[2] = 일주로 보는 나의 성격
-  const SIPSEONG_CHAPTER_INDEX = 3; // 4장 = sections[3] = 십성 분석
-  const SIPSEONG_ROW_INDICES = [0, 5]; // 십성, 십성(지지) 행
-  const SIBIUNSEONG_CHAPTER_INDEX = 4; // 5장 = sections[4] = 십이운성 분석
-  const SIBIUNSEONG_ROW_INDEX = 6; // 십이운성 행
-  const SIBISINSAL_CHAPTER_INDEX = 5; // 6장 = sections[5] = 십이신살 및 귀인 분석
-  const SIBISINSAL_GWIN_ROW_INDICES = [7, 8]; // 십이신살, 귀인 행
+  // 4~6장 원국 표는 3장에서 이미 표시하므로 이후 장에서는 반복하지 않음
+  const SIPSEONG_CHAPTER_INDEX = 3; // 4장 = sections[3] = 십성 분석 (표 제거됨)
+  const SIBIUNSEONG_CHAPTER_INDEX = 4; // 5장 = sections[4] = 십이운성 분석 (표 제거됨)
+  const SIBISINSAL_CHAPTER_INDEX = 5; // 6장 = sections[5] = 십이신살 및 귀인 분석 (표 제거됨)
   const LOVE_CHAPTER_INDEX = 6; // 7장 = sections[6] = 연애운 및 결혼운 분석
   const WEALTH_CHAPTER_INDEX = 7; // 8장 = sections[7] = 재물운 분석
   const CAREER_CHAPTER_INDEX = 8; // 9장 = sections[8] = 직업운 분석
@@ -323,33 +321,7 @@ export function reportContentToDocument(
         highlightColumnIndex: 2,
       });
     }
-    if (i === SIPSEONG_CHAPTER_INDEX && sajuTableData) {
-      blocks.push({
-        type: "sajuTableStyled",
-        columns: sajuTableData.columns,
-        rows: sajuTableData.rows,
-        cellElements: sajuTableData.cellElements,
-        highlightRowIndices: SIPSEONG_ROW_INDICES,
-      });
-    }
-    if (i === SIBIUNSEONG_CHAPTER_INDEX && sajuTableData) {
-      blocks.push({
-        type: "sajuTableStyled",
-        columns: sajuTableData.columns,
-        rows: sajuTableData.rows,
-        cellElements: sajuTableData.cellElements,
-        highlightRowIndices: [SIBIUNSEONG_ROW_INDEX],
-      });
-    }
-    if (i === SIBISINSAL_CHAPTER_INDEX && sajuTableData) {
-      blocks.push({
-        type: "sajuTableStyled",
-        columns: sajuTableData.columns,
-        rows: sajuTableData.rows,
-        cellElements: sajuTableData.cellElements,
-        highlightRowIndices: SIBISINSAL_GWIN_ROW_INDICES,
-      });
-    }
+    // 4장·5장·6장의 원국 표 반복 제거: 3장(일주 분석)에서 이미 전체 표를 보여줬으므로 중복 삽입하지 않음
     if (i === DAEWOON_CHAPTER_INDEX && daewoonTableData) {
       blocks.push({
         type: "daewoonTable",
@@ -471,6 +443,41 @@ export function reportContentToDocument(
 
   // ─── 면책 ───
   blocks.push({ type: "footer", text: content.disclaimer });
+
+  // ─── 전체 리포트 요약 페이지 ───
+  // LLM이 생성한 개인화 한 줄 요약이 있으면 우선 사용, 없으면 섹션 본문에서 추출
+  const chapterSummaries = content.sections.slice(0, 12).map((sec, idx) => {
+    const llmOneLiner = params.chapterOneLiners?.[idx];
+    if (llmOneLiner && llmOneLiner.trim().length >= 10) {
+      return {
+        number: idx + 1,
+        title: REPORT_CHAPTER_TITLES[idx] ?? sec.heading,
+        excerpt: llmOneLiner.trim(),
+      };
+    }
+    // fallback: 짧은 인트로 문장("살펴보겠습니다" 등)을 건너뛰고 첫 실질적인 단락을 추출
+    const paragraphs = sec.body
+      .replace(/\r\n/g, "\n")
+      .split(/\n{2,}/)
+      .map((p) => p.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const substantive = paragraphs.find((p) => p.length >= 40 && !p.endsWith("보겠습니다.") && !p.endsWith("드리겠습니다.")) ?? paragraphs[0] ?? "";
+    const excerpt = substantive.slice(0, 120);
+    return {
+      number: idx + 1,
+      title: REPORT_CHAPTER_TITLES[idx] ?? sec.heading,
+      excerpt: substantive.length > 120 ? excerpt + "…" : excerpt,
+    };
+  });
+  blocks.push({
+    type: "reportSummary",
+    name: params.name,
+    oneLine: content.summary.oneLine,
+    keywords: content.summary.keywords,
+    highlights: content.summary.highlights,
+    chapterSummaries,
+    elementAnalysis: content.elementBalance.analysis,
+  });
 
   // ─── 브랜드 마무리 (최대감사주) ───
   blocks.push({

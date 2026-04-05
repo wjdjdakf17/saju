@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { optionalGenderSchema } from "@/lib/asyncJob";
 import { computeSaju } from "@/lib/saju";
 
 export const runtime = "nodejs";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 const requestSchema = z.object({
   name: z.string().trim().min(1).max(50),
-  gender: z.string().trim().min(1).max(20),
+  gender: optionalGenderSchema,
   birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "birthDate must be YYYY-MM-DD"),
   birthTime: z.string().regex(/^\d{2}:\d{2}$/, "birthTime must be HH:MM"),
 });

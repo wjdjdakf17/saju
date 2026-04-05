@@ -18,7 +18,7 @@ type PollResponse =
 type SajuValidateResponse =
   | {
     status: "ok";
-    input: { name: string; gender: string; birthDate: string; birthTime: string; calendar: "solar" };
+    input: { name: string; gender?: string; birthDate: string; birthTime: string; calendar: "solar" };
     normalizedBirth: Birth;
     saju: unknown;
     verifiedAt: string;
@@ -78,7 +78,7 @@ function getStageDescription(stage: string, running: boolean, error: string, pdf
 
 export default function LocalTestClient() {
   const [name, setName] = useState("김태윤");
-  const [gender, setGender] = useState("남자");
+  const [gender, setGender] = useState("");
   const [calendar, setCalendar] = useState<Calendar>("solar");
   const [birth, setBirth] = useState<Birth>({ year: 1995, month: 10, day: 7, hour: 10, minute: 0 });
   const [llmModel, setLlmModel] = useState<string>(GEMINI_MODELS[0]);
@@ -94,7 +94,7 @@ export default function LocalTestClient() {
   const [verifyName, setVerifyName] = useState("김태윤");
   const [verifyBirthDate, setVerifyBirthDate] = useState("1995-10-07");
   const [verifyBirthTime, setVerifyBirthTime] = useState("10:00");
-  const [verifyGender, setVerifyGender] = useState("남");
+  const [verifyGender, setVerifyGender] = useState("");
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState("");
   const [verifyResponse, setVerifyResponse] = useState<unknown>(null);
@@ -104,14 +104,13 @@ export default function LocalTestClient() {
   const canStart = useMemo(() => {
     return (
       name.trim().length > 0 &&
-      gender.trim().length > 0 &&
       birth.year >= 1900 &&
       birth.month >= 1 &&
       birth.day >= 1 &&
       birth.hour >= 0 &&
       birth.minute >= 0
     );
-  }, [name, gender, birth]);
+  }, [name, birth]);
 
   const stageLabel = useMemo(() => getStageLabel(stage, running, error, pdfUrl), [stage, running, error, pdfUrl]);
   const stageDescription = useMemo(
@@ -122,11 +121,10 @@ export default function LocalTestClient() {
   const canVerify = useMemo(() => {
     return (
       verifyName.trim().length > 0 &&
-      verifyGender.trim().length > 0 &&
       /^\d{4}-\d{2}-\d{2}$/.test(verifyBirthDate) &&
       /^\d{2}:\d{2}$/.test(verifyBirthTime)
     );
-  }, [verifyName, verifyGender, verifyBirthDate, verifyBirthTime]);
+  }, [verifyName, verifyBirthDate, verifyBirthTime]);
 
   useEffect(() => {
     if (!canVerify) {
@@ -145,7 +143,7 @@ export default function LocalTestClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: verifyName.trim(),
-            gender: verifyGender.trim(),
+            ...(verifyGender.trim() ? { gender: verifyGender.trim() } : {}),
             birthDate: verifyBirthDate,
             birthTime: verifyBirthTime,
           }),
@@ -207,8 +205,8 @@ export default function LocalTestClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
-          gender,
+          name: name.trim(),
+          ...(gender.trim() ? { gender: gender.trim() } : {}),
           calendar,
           birth,
           isLeapMonth: false,
@@ -320,12 +318,16 @@ export default function LocalTestClient() {
               />
             </div>
             <div>
-              <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">성별</div>
-              <input
+              <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">성별 (선택)</div>
+              <select
                 value={gender}
                 onChange={(e) => setGender(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-              />
+              >
+                <option value="">선택 안 함</option>
+                <option value="남자">남자</option>
+                <option value="여자">여자</option>
+              </select>
             </div>
             <div>
               <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">양/음력</div>
@@ -360,7 +362,7 @@ export default function LocalTestClient() {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid gap-2" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr" }}>
               {(["year", "month", "day", "hour", "minute"] as const).map((k) => (
                 <div key={k}>
                   <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
@@ -429,7 +431,7 @@ export default function LocalTestClient() {
           <div>
             <h2 className="text-lg font-semibold">만세력 데이터 검증</h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              이름/생년월일/태어난시간/성별만 입력하면 양력 기준 만세력 응답을 자동으로 계속 갱신합니다.
+              이름/생년월일/태어난시간을 입력하면 양력 기준 만세력 응답을 자동으로 계속 갱신합니다. 성별은 선택입니다.
             </p>
           </div>
           <div className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -470,12 +472,13 @@ export default function LocalTestClient() {
             </div>
 
             <div>
-              <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">성별</div>
+              <div className="text-xs font-medium text-zinc-600 dark:text-zinc-400">성별 (선택)</div>
               <select
                 value={verifyGender}
                 onChange={(e) => setVerifyGender(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
               >
+                <option value="">선택 안 함</option>
                 <option value="남">남</option>
                 <option value="여">여</option>
                 <option value="기타">기타</option>

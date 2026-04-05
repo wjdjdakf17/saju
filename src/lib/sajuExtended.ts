@@ -347,7 +347,7 @@ export type DaewoonTableResult = {
 export function computeDaewoonTable(
   pillarKorean: PillarKorean,
   dayStem: HeavenlyStem,
-  gender: string,
+  gender?: string,
   birthMonth?: number,
   birthDay?: number,
 ): DaewoonTableResult | null {
@@ -356,7 +356,9 @@ export function computeDaewoonTable(
   if (!monthPillar || !yearPillar) return null;
 
   const yearYang = getHeavenlyStemYinYang(yearPillar.stem) === "양";
-  const isMale = gender === "남자";
+  /** 미입력 시 전통 대운 순·역행에서 남성과 동일 취급 */
+  const trimmed = gender?.trim() ?? "";
+  const isMale = trimmed === "" || trimmed === "남자" || trimmed === "남";
   const forward = (yearYang && isMale) || (!yearYang && !isMale);
 
   const si = STEM_INDEX[monthPillar.stem];
